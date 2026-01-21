@@ -81,6 +81,18 @@ prototype_chameleon_mcp_workflow/
    nano .env  # or use your preferred editor
    ```
 
+5. **Verify your setup**
+   ```bash
+   # Run the verification script to check everything is working
+   python verify_setup.py
+   ```
+   
+   This will check:
+   - All dependencies are installed
+   - Project structure is correct
+   - Workflow engine API is functional
+   - Python modules can be imported
+
 ### Running the Components
 
 #### 1. Start the Workflow Engine Server

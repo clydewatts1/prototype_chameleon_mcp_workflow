@@ -72,7 +72,10 @@ class MCPWorkflowServer:
             "WORKFLOW_ENGINE_URL", 
             "http://localhost:8000"
         )
-        self.client = httpx.AsyncClient(base_url=self.workflow_engine_url)
+        self.client = httpx.AsyncClient(
+            base_url=self.workflow_engine_url,
+            timeout=10.0
+        )
         logger.info(f"MCP Workflow Server initialized with engine at {self.workflow_engine_url}")
     
     async def list_resources(self) -> List[Dict[str, Any]]:

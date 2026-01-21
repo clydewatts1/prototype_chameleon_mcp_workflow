@@ -73,7 +73,8 @@ def create_workflow(name: str, description: str, steps: List[str]) -> Optional[D
                 "name": name,
                 "description": description,
                 "steps": steps
-            }
+            },
+            timeout=10.0
         )
         response.raise_for_status()
         return response.json()
@@ -93,7 +94,10 @@ def get_workflow(workflow_id: str) -> Optional[Dict]:
         Workflow details or None on error
     """
     try:
-        response = httpx.get(f"{WORKFLOW_ENGINE_URL}/workflows/{workflow_id}")
+        response = httpx.get(
+            f"{WORKFLOW_ENGINE_URL}/workflows/{workflow_id}",
+            timeout=10.0
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -112,7 +116,10 @@ def execute_workflow(workflow_id: str) -> Optional[Dict]:
         Execution response or None on error
     """
     try:
-        response = httpx.post(f"{WORKFLOW_ENGINE_URL}/workflows/{workflow_id}/execute")
+        response = httpx.post(
+            f"{WORKFLOW_ENGINE_URL}/workflows/{workflow_id}/execute",
+            timeout=10.0
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:

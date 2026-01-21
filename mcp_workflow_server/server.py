@@ -177,22 +177,32 @@ class MCPWorkflowServer:
         """
         logger.info(f"Calling tool: {tool_name} with args: {arguments}")
         
-        if tool_name == "create_workflow":
-            response = await self.client.post("/workflows", json=arguments)
-            return response.json()
-        
-        elif tool_name == "execute_workflow":
-            workflow_id = arguments["workflow_id"]
-            response = await self.client.post(f"/workflows/{workflow_id}/execute")
-            return response.json()
-        
-        elif tool_name == "get_workflow_status":
-            workflow_id = arguments["workflow_id"]
-            response = await self.client.get(f"/workflows/{workflow_id}")
-            return response.json()
-        
-        else:
-            raise ValueError(f"Unknown tool: {tool_name}")
+        try:
+            if tool_name == "create_workflow":
+                response = await self.client.post("/workflows", json=arguments)
+                response.raise_for_status()
+                return response.json()
+            
+            elif tool_name == "execute_workflow":
+                workflow_id = arguments["workflow_id"]
+                response = await self.client.post(f"/workflows/{workflow_id}/execute")
+                response.raise_for_status()
+                return response.json()
+            
+            elif tool_name == "get_workflow_status":
+                workflow_id = arguments["workflow_id"]
+                response = await self.client.get(f"/workflows/{workflow_id}")
+                response.raise_for_status()
+                return response.json()
+            
+            else:
+                raise ValueError(f"Unknown tool: {tool_name}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error calling tool {tool_name}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Error calling tool {tool_name}: {e}")
+            raise
     
     async def list_prompts(self) -> List[Dict[str, Any]]:
         """

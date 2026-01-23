@@ -9,7 +9,8 @@ import json
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from attr import define
-from sqlalchemy import Float, create_engine, Column, String, Text, DateTime, JSON
+from sqlalchemy import Float, create_engine, Column, String, Text, DateTime, JSON, Boolean
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
@@ -70,12 +71,12 @@ class WorkflowModel(Base):
     __tablename__ = "wf_workflows"   
     __table_args__ = {"comment": "Table storing workflow definitions"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique workflow identifier")
-    name = Column(String, nullable=False,comment="Human-readable name of the workflow")
-    description = Column(Text, nullable=True, comment="Detailed description of the workflow")
-    status = Column(String, default="created", comment="Processing status of the workflow")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the workflow was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the workflow was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique workflow identifier")
+    name: Mapped[str] = mapped_column(String, nullable=False,comment="Human-readable name of the workflow")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the workflow")
+    status: Mapped[str] = mapped_column(String, default="created", comment="Processing status of the workflow")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the workflow was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the workflow was last updated")
 
 class WorkflowModelAttribute(Base):
     """
@@ -84,14 +85,14 @@ class WorkflowModelAttribute(Base):
     __tablename__ = "wf_workflow_attributes"
     __table_args__ = {"comment": "Table storing workflow attributes"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique attribute identifier")
-    workflow_id = Column(String, nullable=False, comment="Associated workflow identifier")
-    key = Column(String, nullable=False, comment="Attribute key")
-    value = Column(Text, nullable=True, comment="Attribute value")
-    description = Column(Text, nullable=True, comment="Detailed description of the attribute")
-    context = Column(Text, nullable=True, comment="Contextual information related to the attribute")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique attribute identifier")
+    workflow_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated workflow identifier")
+    key: Mapped[str] = mapped_column(String, nullable=False, comment="Attribute key")
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Attribute value")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the attribute")
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Contextual information related to the attribute")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
 
 class WorkflowInteraction(Base):
     """
@@ -99,13 +100,13 @@ class WorkflowInteraction(Base):
     """
     __tablename__ = "wf_workflow_interactions"
     __table_args__ = {"comment": "Table storing workflow interactions"}
-    id = Column(String, primary_key=True, index=True, comment="Unique interaction identifier")
-    workflow_id = Column(String, nullable=False, comment="Associated workflow identifier")
-    interaction_type = Column(String, nullable=False, comment="Type of interaction")
-    name = Column(String, nullable=False, comment="Human-readable name of the interaction")
-    description = Column(Text, nullable=True, comment="Detailed description of the interaction")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the interaction was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the interaction was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique interaction identifier")
+    workflow_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated workflow identifier")
+    interaction_type: Mapped[str] = mapped_column(String, nullable=False, comment="Type of interaction")
+    name: Mapped[str] = mapped_column(String, nullable=False, comment="Human-readable name of the interaction")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the interaction")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the interaction was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the interaction was last updated")
 
 class WorkflowInteractionComponent(Base):
     """
@@ -114,14 +115,14 @@ class WorkflowInteractionComponent(Base):
     __tablename__ = "wf_workflow_interaction_components"
     __table_args__ = {"comment": "Table storing components of workflow interactions"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique interaction component identifier")
-    interaction_id = Column(String, nullable=False, comment="Associated interaction identifier")
-    role_id = Column(String, nullable=False, comment="Associated role identifier")
-    direction = Column(String, nullable=False, comment="Direction of the component, e.g., 'input' or 'output'")
-    name = Column(String, nullable=False, comment="Human-readable name of the component")
-    description = Column(Text, nullable=True, comment="Detailed description of the component")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the component was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the component was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique interaction component identifier")
+    interaction_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated interaction identifier")
+    role_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated role identifier")
+    direction: Mapped[str] = mapped_column(String, nullable=False, comment="Direction of the component, e.g., 'input' or 'output'")
+    name: Mapped[str] = mapped_column(String, nullable=False, comment="Human-readable name of the component")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the component")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the component was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the component was last updated")
 
 class WorkflowRole(Base):
     """
@@ -130,12 +131,13 @@ class WorkflowRole(Base):
     __tablename__ = "wf_workflow_roles"
     __table_args__ = {"comment": "Table storing workflow roles"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique role identifier")
-    name = Column(String, nullable=False, comment="Human-readable name of the role")
-    type = Column(String, nullable=False, comment="Type of the role")
-    description = Column(Text, nullable=True, comment="Detailed description of the role")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the role was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the role was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique role identifier")
+    workflow_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, comment="Associated workflow identifier (optional)")
+    name: Mapped[str] = mapped_column(String, nullable=False, comment="Human-readable name of the role")
+    type: Mapped[str] = mapped_column(String, nullable=False, comment="Type of the role")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the role")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the role was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the role was last updated")
 
 class WorkflowRoleAttribute(Base):
     """
@@ -144,14 +146,15 @@ class WorkflowRoleAttribute(Base):
     __tablename__ = "wf_workflow_role_attributes"
     __table_args__ = {"comment": "Table storing workflow role attributes"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique role attribute identifier")
-    role_id = Column(String, nullable=False, comment="Associated role identifier")
-    key = Column(String, nullable=False, comment="Attribute key")
-    value = Column(Text, nullable=True, comment="Attribute value")
-    description = Column(Text, nullable=True, comment="Detailed description of the attribute")
-    context = Column(Text, nullable=True, comment="Context information for the attribute")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique role attribute identifier")
+    role_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated role identifier")
+    workflow_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, comment="Associated workflow identifier (optional)")
+    key: Mapped[str] = mapped_column(String, nullable=False, comment="Attribute key")
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Attribute value")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the attribute")
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Context information for the attribute")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
 
 class WorkflowInstance(Base):
     """
@@ -160,11 +163,12 @@ class WorkflowInstance(Base):
     __tablename__ = "wf_workflow_instances"
     __table_args__ = {"comment": "Table storing workflow instances"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique instance identifier")
-    workflow_id = Column(String, nullable=False, comment="Associated workflow identifier")
-    status = Column(String, default="initialized", comment="Current status of the instance")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the instance was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the instance was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique instance identifier")
+    workflow_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, comment="Associated workflow identifier (optional)")
+    status: Mapped[str] = mapped_column(String, default="initialized", comment="Current status of the instance")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the instance was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the instance was last updated")
+ 
 class WorkflowInstanceAttribute(Base):
     """
     SQLAlchemy Model representing the 'wf_workflow_instance_attributes' table.
@@ -172,14 +176,14 @@ class WorkflowInstanceAttribute(Base):
     __tablename__ = "wf_workflow_instance_attributes"
     __table_args__ = {"comment": "Table storing workflow instance attributes"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique instance attribute identifier")
-    instance_id = Column(String, nullable=False, comment="Associated instance identifier")
-    key = Column(String, nullable=False, comment="Attribute key")
-    value = Column(Text, nullable=True, comment="Attribute value")
-    description = Column(Text, nullable=True, comment="Detailed description of the attribute")
-    context = Column(Text, nullable=True, comment="Context information for the attribute")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique instance attribute identifier")
+    instance_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated instance identifier")
+    key: Mapped[str] = mapped_column(String, nullable=False, comment="Attribute key")
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Attribute value")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the attribute")
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Context information for the attribute")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
 
 class WorkflowUnitOfWorkType(Base):
     """
@@ -188,12 +192,12 @@ class WorkflowUnitOfWorkType(Base):
     __tablename__ = "wf_workflow_unit_of_work_types"
     __table_args__ = {"comment": "Table storing workflow unit of work types"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique unit of work type identifier")
-    name = Column(String, nullable=False, comment="Name of the unit of work type")
-    description = Column(Text, nullable=True, comment="Detailed description of the unit of work type")
-    uow_class = Column(String, nullable=False, comment="Class of the unit of work (e.g., atomic, set, tuple)")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work type was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work type was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique unit of work type identifier")
+    name: Mapped[str] = mapped_column(String, nullable=False, comment="Name of the unit of work type")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the unit of work type")
+    uow_class: Mapped[str] = mapped_column(String, nullable=False, comment="Class of the unit of work (e.g., atomic, set, tuple)")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work type was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work type was last updated")
 
 class WorkflowUnitOfWork(Base):
     """
@@ -202,14 +206,14 @@ class WorkflowUnitOfWork(Base):
     __tablename__ = "wf_workflow_units_of_work"
     __table_args__ = {"comment": "Table storing workflow units of work"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique unit of work identifier")
-    instance_id = Column(String, nullable=False, comment="Associated workflow instance identifier")
-    parent_id = Column(String, nullable=True, comment="Parent unit of work identifier for hierarchical UoW")
-    uow_status = Column(String, default="pending", comment="Current status of the unit of work")
-    priority = Column(Float, default=0.0, comment="Priority of the unit of work")
-    status = Column(String, default="pending", comment="General status of the unit of work")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique unit of work identifier")
+    instance_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated workflow instance identifier")
+    parent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, comment="Parent unit of work identifier for hierarchical UoW")
+    uow_status: Mapped[str] = mapped_column(String, default="pending", comment="Current status of the unit of work")
+    priority: Mapped[float] = mapped_column(Float, default=0.0, comment="Priority of the unit of work")
+    status: Mapped[str] = mapped_column(String, default="pending", comment="General status of the unit of work")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the unit of work was last updated")
 
 class WorkflowUnitOfWorkAttribute(Base):
     """
@@ -218,14 +222,14 @@ class WorkflowUnitOfWorkAttribute(Base):
     __tablename__ = "wf_workflow_unit_of_work_attributes"
     __table_args__ = {"comment": "Table storing workflow unit of work attributes"}
 
-    id = Column(String, primary_key=True, index=True, comment="Unique unit of work attribute identifier")
-    unit_of_work_id = Column(String, nullable=False, comment="Associated unit of work identifier")
-    key = Column(String, nullable=False, comment="Attribute key")
-    value = Column(Text, nullable=True, comment="Attribute value")
-    description = Column(Text, nullable=True, comment="Detailed description of the attribute")
-    context = Column(Text, nullable=True, comment="Context information for the attribute")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique unit of work attribute identifier")
+    unit_of_work_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated unit of work identifier")
+    key: Mapped[str] = mapped_column(String, nullable=False, comment="Attribute key")
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Attribute value")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the attribute")
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Context information for the attribute")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was created")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="Timestamp when the attribute was last updated")
 
 
 class DatabaseManager:
@@ -466,6 +470,7 @@ class DatabaseManager:
             session.flush()  # Ensure INSERT executes so refresh works
             session.refresh(new_interaction)
             return self._to_dict(new_interaction)
+        
     def delete_workflow_interaction(self, workflow_id: str, interaction_id: str) -> bool:
         """Delete a workflow interaction by workflow ID and interaction ID."""
         with self.get_session() as session:
@@ -478,7 +483,7 @@ class DatabaseManager:
                 return True
             return False
         
-    
+    @validate_workflow_exists   
     def create_workflow_interaction_component(self, interaction_id: str, role_id: str, direction: str, name: str, description: str = "") -> Dict[str, Any]:
         """Create and save a new workflow interaction component."""
         with self.get_session() as session:
@@ -506,6 +511,7 @@ class DatabaseManager:
                 session.delete(component)
                 return True
             return False
+
     def create_workflow_role(self, role_id: str, name: str, type: str, description: str = "") -> Dict[str, Any]:
         """Create and save a new workflow role."""
         with self.get_session() as session:

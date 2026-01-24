@@ -29,6 +29,7 @@ except ImportError:  # Fallback for direct script execution
     if str(ROOT_DIR) not in sys.path:
         sys.path.append(str(ROOT_DIR))
     from common import config as cfg
+
 # Decorators for database Reference Management
 
 def validate_workflow_exists(func: Callable):
@@ -58,6 +59,66 @@ def validate_workflow_exists(func: Callable):
         # 3. If all is well, run the original function
         return func(self, *args, **kwargs)
     
+    return wrapper
+
+def validate_role_exists(func: Callable):
+    """
+    Decorator to ensure the role_id exists in the database 
+    before executing the decorated method.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        role_id = kwargs.get('role_id') or (args[0] if args else None)
+        
+        if not role_id:
+            raise ValueError("Validation Error: role_id is required.")
+
+        with self.get_session() as session:
+            exists = session.query(WorkflowRole).filter(WorkflowRole.id == role_id).first()
+            if not exists:
+                raise ValueError(f"Integrity Error: Role '{role_id}' not found.")
+
+        return func(self, *args, **kwargs)
+    return wrapper
+
+def validate_interaction_exists(func: Callable):
+    """
+    Decorator to ensure the interaction_id exists in the database 
+    before executing the decorated method.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        interaction_id = kwargs.get('interaction_id') or (args[0] if args else None)
+        
+        if not interaction_id:
+            raise ValueError("Validation Error: interaction_id is required.")
+
+        with self.get_session() as session:
+            exists = session.query(WorkflowInteraction).filter(WorkflowInteraction.id == interaction_id).first()
+            if not exists:
+                raise ValueError(f"Integrity Error: Interaction '{interaction_id}' not found.")
+
+        return func(self, *args, **kwargs)
+    return wrapper
+
+def validate_actor_exists(func: Callable):
+    """
+    Decorator to ensure the actor_id exists in the database 
+    before executing the decorated method.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        actor_id = kwargs.get('actor_id') or (args[0] if args else None)
+        
+        if not actor_id:
+            raise ValueError("Validation Error: actor_id is required.")
+
+        with self.get_session() as session:
+            exists = session.query(WorkflowActor).filter(WorkflowActor.id == actor_id).first()
+            if not exists:
+                raise ValueError(f"Integrity Error: Actor '{actor_id}' not found.")
+
+        return func(self, *args, **kwargs)
     return wrapper
 
 
@@ -270,7 +331,24 @@ class WorkflowActorRoleAssignment(Base, TimestampMixIn):
     actor_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated actor identifier")
     role_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated role identifier")
     status: Mapped[str] = mapped_column(String, default="active", comment="Status of the role assignment")
+    priority_weight: Mapped[float] = mapped_column(Float, default=1.0, comment="Priority weight of the role assignment")
 
+
+class WorkflowGuardian(Base, TimestampMixIn):
+    """
+    SQLAlchemy Model representing the 'wf_workflow_guardians' table.
+    This is between the inbound/outbound  interactions and role. This defines what UOW can flow between an interaction and a role.
+    """
+    __tablename__ = "wf_workflow_guardians"
+    __table_args__ = {"comment": "Table storing workflow guardians"}
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique guardian identifier")
+    workflow_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated workflow identifier")
+    interaction_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated interaction identifier")
+    role_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated role identifier")
+    direction: Mapped[str] = mapped_column(String, nullable=False, comment="Direction of the guardian, e.g., 'inbound' or 'outbound'")
+    type: Mapped[str] = mapped_column(String, nullable=False, comment="Type of guardian, e.g., 'hard' or 'soft'")
+    attributes: Mapped[Optional[str]] = mapped_column(JSON , nullable=True, comment="Additional attributes for the guardian in JSON format")
 
 class DatabaseManager:
     """
@@ -1064,6 +1142,8 @@ if __name__ == "__main__":
     # Clean up any existing test data
     print("Cleaning up existing test data...")
     db_manager.delete_workflow("wf_001")
+
+    print("Cleanup complete.")
     
     workflow = db_manager.create_workflow(
         workflow_id="wf_001",
@@ -1083,9 +1163,38 @@ if __name__ == "__main__":
 
     print("Created Attribute:", attribute)
     
+    # Create Role
+    role = db_manager.create_workflow_role(
+        role_id="role_001",
+        name="Test Role",
+        type="system",
+        description="A role for testing"
+    )
+
+    print("Created Role:", role)
+
+    # Create Interaction
+    interaction = db_manager.create_workflow_interaction(
+        workflow_id="wf_001",
+        interaction_id="int_001",
+        interaction_type="message",
+        name="Test Interaction",
+        description="An interaction for testing"
+    )
+    print("Created Interaction:", interaction)
     fetched_workflow = db_manager.get_workflow("wf_001")
     print("Fetched Workflow:", fetched_workflow)
     
+    # Create interaction component
+    component = db_manager.create_workflow_interaction_component(
+        interaction_id="int_001",
+        role_id="role_001",
+        direction="inbound",
+        name="Test Component",
+        description="A component for testing"
+    )
+    print("Created Interaction Component:", component)
+
     updated_workflow = db_manager.update_workflow_status("wf_001", "active")
     print("Updated Workflow Status:", updated_workflow)
     

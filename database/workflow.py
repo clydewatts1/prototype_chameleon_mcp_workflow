@@ -13,6 +13,7 @@ from sqlalchemy import Float, create_engine, Column, String, Text, DateTime, JSO
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import MetaData
 from contextlib import contextmanager
 from functools import wraps
 from typing import Callable
@@ -62,7 +63,9 @@ def validate_workflow_exists(func: Callable):
 
 
 # Base class for models
-Base = declarative_base()
+metadata = MetaData()
+# TODO: Add naming conventions to metadata if needed , use config settings
+Base = declarative_base(metadata=metadata)
 
 class TimestampMixIn:
     """
@@ -228,6 +231,45 @@ class WorkflowUnitOfWorkAttribute(Base, TimestampMixIn):
     value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Attribute value")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the attribute")
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Context information for the attribute")
+
+class WorkflowActor(Base, TimestampMixIn):
+    """
+    SQLAlchemy Model representing the 'wf_workflow_actors' table.
+    """
+    __tablename__ = "wf_workflow_actors"
+    __table_args__ = {"comment": "Table storing workflow actors"}
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique actor identifier")
+    name: Mapped[str] = mapped_column(String, nullable=False, comment="Name of the actor")
+    type: Mapped[str] = mapped_column(String, nullable=False, comment="Type of the actor HUMAN,AI_AGENT,SYSTEM")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the actor")
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Context information for the actor")
+
+class WorkflowActorAttribute(Base, TimestampMixIn):
+    """
+    SQLAlchemy Model representing the 'wf_workflow_actor_attributes' table.
+    """
+    __tablename__ = "wf_workflow_actor_attributes"
+    __table_args__ = {"comment": "Table storing workflow actor attributes"}
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique actor attribute identifier")
+    actor_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated actor identifier")
+    key: Mapped[str] = mapped_column(String, nullable=False, comment="Attribute key")
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Attribute value")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Detailed description of the attribute")
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Context information for the attribute")
+
+class WorkflowActorRoleAssignment(Base, TimestampMixIn):
+    """
+    SQLAlchemy Model representing the 'wf_workflow_actor_role_assignments' table.
+    """
+    __tablename__ = "wf_workflow_actor_role_assignments"
+    __table_args__ = {"comment": "Table storing workflow actor role assignments"}
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, comment="Unique actor role assignment identifier")
+    actor_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated actor identifier")
+    role_id: Mapped[str] = mapped_column(String, nullable=False, comment="Associated role identifier")
+    status: Mapped[str] = mapped_column(String, default="active", comment="Status of the role assignment")
 
 
 class DatabaseManager:
@@ -399,6 +441,65 @@ class DatabaseManager:
             if attribute:
                 return self._to_dict(attribute)
             return None
+        
+    def get_workflow_unit_of_work_types(self) -> List[Dict[str, Any]]:
+        """Retrieve all workflow unit of work types."""
+        with self.get_session() as session:
+            uow_types = session.query(WorkflowUnitOfWorkType).all()
+            return [self._to_dict(uow_type) for uow_type in uow_types]
+        
+    def get_workflow_unit_of_work_type(self, uow_type_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a specific workflow unit of work type by ID."""
+        with self.get_session() as session:
+            uow_type = session.query(WorkflowUnitOfWorkType).filter(WorkflowUnitOfWorkType.id == uow_type_id).first()
+            if uow_type:
+                return self._to_dict(uow_type)
+            return None
+    
+    def get_workflow_unit_of_works(self, instance_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all units of work for a given workflow instance."""
+        with self.get_session() as session:
+            uows = session.query(WorkflowUnitOfWork).filter(WorkflowUnitOfWork.instance_id == instance_id).all()
+            return [self._to_dict(uow) for uow in uows]
+    
+    def get_workflow_unit_of_work(self, uow_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a specific workflow unit of work by ID."""
+        with self.get_session() as session:
+            uow = session.query(WorkflowUnitOfWork).filter(WorkflowUnitOfWork.id == uow_id).first()
+            if uow:
+                return self._to_dict(uow)
+            return None
+        
+    def get_workflow_unit_of_work_attributes(self, uow_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all attributes for a given workflow unit of work."""
+        with self.get_session() as session:
+            attributes = session.query(WorkflowUnitOfWorkAttribute).filter(WorkflowUnitOfWorkAttribute.unit_of_work_id == uow_id).all()
+            return [self._to_dict(attr) for attr in attributes]
+        
+    def get_workflow_unit_of_work_attribute(self, uow_id: str, key: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a specific attribute for a given workflow unit of work by key."""
+        with self.get_session() as session:
+            attribute = session.query(WorkflowUnitOfWorkAttribute).filter(
+                WorkflowUnitOfWorkAttribute.unit_of_work_id == uow_id,
+                WorkflowUnitOfWorkAttribute.key == key
+            ).first()
+            if attribute:
+                return self._to_dict(attribute)
+            return None
+    def get_workflow_actors(self) -> List[Dict[str, Any]]:
+        """Retrieve all workflow actors."""
+        with self.get_session() as session:
+            actors = session.query(WorkflowActor).all()
+            return [self._to_dict(actor) for actor in actors]
+    
+    def get_workflow_actor(self, actor_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a specific workflow actor by ID."""
+        with self.get_session() as session:
+            actor = session.query(WorkflowActor).filter(WorkflowActor.id == actor_id).first()
+            if actor:
+                return self._to_dict(actor)
+            return None
+    # --- Helper Methods ---
     # --- Setters / Creators ---
 
     def create_workflow(self, workflow_id: str, name: str, description: str) -> Dict[str, Any]:
@@ -583,6 +684,183 @@ class DatabaseManager:
                 return True
             return False
 
+    def create_workflow_instance_attribute(self, instance_id: str, key: str, value: str, description: str = "", context: str = "") -> Dict[str, Any]:   
+        """Create and save a new workflow instance attribute."""
+        with self.get_session() as session:
+            new_attribute = WorkflowInstanceAttribute(
+                id=f"{instance_id}_{key}",
+                instance_id=instance_id,
+                key=key,
+                value=value,
+                description=description,
+                context=context
+            )
+            session.add(new_attribute)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_attribute)
+            return self._to_dict(new_attribute)
+        
+    def delete_workflow_instance_attribute(self, instance_id: str, key: str) -> bool:
+        """Delete a workflow instance attribute by instance ID and key."""
+        with self.get_session() as session:
+            attribute = session.query(WorkflowInstanceAttribute).filter(
+                WorkflowInstanceAttribute.instance_id == instance_id,
+                WorkflowInstanceAttribute.key == key
+            ).first()
+            if attribute:
+                session.delete(attribute)
+                return True
+            return False
+        
+    def create_workflow_unit_of_work_type(self, uow_type_id: str, name: str, description: str, uow_class: str) -> Dict[str, Any]:
+        """Create and save a new workflow unit of work type."""
+        with self.get_session() as session:
+            new_uow_type = WorkflowUnitOfWorkType(
+                id=uow_type_id,
+                name=name,
+                description=description,
+                uow_class=uow_class
+            )
+            session.add(new_uow_type)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_uow_type)
+            return self._to_dict(new_uow_type)
+    def delete_workflow_unit_of_work_type(self, uow_type_id: str) -> bool:
+        """Delete a workflow unit of work type by ID."""
+        with self.get_session() as session:
+            uow_type = session.query(WorkflowUnitOfWorkType).filter(WorkflowUnitOfWorkType.id == uow_type_id).first()
+            if uow_type:
+                session.delete(uow_type)
+                return True
+            return False
+        
+    def create_workflow_unit_of_work(self, uow_id: str, instance_id: str, parent_id: Optional[str] = None, uow_status: str = "pending", priority: float = 0.0, status: str = "pending") -> Dict[str, Any]:
+        """Create and save a new workflow unit of work."""
+        with self.get_session() as session:
+            new_uow = WorkflowUnitOfWork(
+                id=uow_id,
+                instance_id=instance_id,
+                parent_id=parent_id,
+                uow_status=uow_status,
+                priority=priority,
+                status=status
+            )
+            session.add(new_uow)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_uow)
+            return self._to_dict(new_uow)
+    def delete_workflow_unit_of_work(self, uow_id: str) -> bool:
+        """Delete a workflow unit of work by ID."""
+        with self.get_session() as session:
+            uow = session.query(WorkflowUnitOfWork).filter(WorkflowUnitOfWork.id == uow_id).first()
+            if uow:
+                session.delete(uow)
+                return True
+            return False
+    def create_workflow_unit_of_work_attribute(self, uow_id: str, key: str, value: str, description: str = "", context: str = "") -> Dict[str, Any]:
+        """Create and save a new workflow unit of work attribute."""
+        with self.get_session() as session:
+            new_attribute = WorkflowUnitOfWorkAttribute(
+                id=f"{uow_id}_{key}",
+                unit_of_work_id=uow_id,
+                key=key,
+                value=value,
+                description=description,
+                context=context
+            )
+            session.add(new_attribute)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_attribute)
+            return self._to_dict(new_attribute)
+    def delete_workflow_unit_of_work_attribute(self, uow_id: str, key: str) -> bool:
+        """Delete a workflow unit of work attribute by unit of work ID and key."""
+        with self.get_session() as session:
+            attribute = session.query(WorkflowUnitOfWorkAttribute).filter(
+                WorkflowUnitOfWorkAttribute.unit_of_work_id == uow_id,
+                WorkflowUnitOfWorkAttribute.key == key
+            ).first()
+            if attribute:
+                session.delete(attribute)
+                return True
+            return False
+
+    def create_workflow_actor(self, actor_id: str, name: str, type: str, description: str = "", context: str = "") -> Dict[str, Any]:
+        """Create and save a new workflow actor."""
+        with self.get_session() as session:
+            new_actor = WorkflowActor(
+                id=actor_id,
+                name=name,
+                type=type,
+                description=description,
+                context=context
+            )
+            session.add(new_actor)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_actor)
+            return self._to_dict(new_actor)
+        
+    def delete_workflow_actor(self, actor_id: str) -> bool:
+        """Delete a workflow actor by ID."""
+        with self.get_session() as session:
+            actor = session.query(WorkflowActor).filter(WorkflowActor.id == actor_id).first()
+            if actor:
+                session.delete(actor)
+                return True
+            return False
+        
+    def create_workflow_actor_attribute(self, actor_id: str, key: str, value: str, description: str = "", context: str = "") -> Dict[str, Any]:
+        """Create and save a new workflow actor attribute."""
+        with self.get_session() as session:
+            new_attribute = WorkflowActorAttribute(
+                id=f"{actor_id}_{key}",
+                actor_id=actor_id,
+                key=key,
+                value=value,
+                description=description,
+                context=context
+            )
+            session.add(new_attribute)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_attribute)
+            return self._to_dict(new_attribute)
+        
+    def delete_workflow_actor_attribute(self, actor_id: str, key: str) -> bool:
+        """Delete a workflow actor attribute by actor ID and key."""
+        with self.get_session() as session:
+            attribute = session.query(WorkflowActorAttribute).filter(
+                WorkflowActorAttribute.actor_id == actor_id,
+                WorkflowActorAttribute.key == key
+            ).first()
+            if attribute:
+                session.delete(attribute)
+                return True
+            return False
+        
+    def create_workflow_actor_role_assignment(self, actor_id: str, role_id: str, status: str = "active") -> Dict[str, Any]:
+        """Create and save a new workflow actor role assignment."""
+        with self.get_session() as session:
+            new_assignment = WorkflowActorRoleAssignment(
+                id=f"{actor_id}_{role_id}",
+                actor_id=actor_id,
+                role_id=role_id,
+                status=status
+            )
+            session.add(new_assignment)
+            session.flush()  # Ensure INSERT executes so refresh works
+            session.refresh(new_assignment)
+            return self._to_dict(new_assignment)
+    
+    def delete_workflow_actor_role_assignment(self, actor_id: str, role_id: str) -> bool:
+        """Delete a workflow actor role assignment by actor ID and role ID."""
+        with self.get_session() as session:
+            assignment = session.query(WorkflowActorRoleAssignment).filter(
+                WorkflowActorRoleAssignment.actor_id == actor_id,
+                WorkflowActorRoleAssignment.role_id == role_id
+            ).first()
+            if assignment:
+                session.delete(assignment)
+                return True
+            return False
     # --- Update Functions ---
 
     def update_workflow_status(self, workflow_id: str, new_status: str) -> Optional[Dict[str, Any]]:
@@ -646,6 +924,61 @@ class DatabaseManager:
                 session.refresh(role)
                 return self._to_dict(role)
             return None
+        
+    def update_workflow_role_attribute(self, role_id: str, key: str, new_value: str) -> Optional[Dict[str, Any]]:
+        """Update the value of a workflow role attribute."""
+        with self.get_session() as session:
+            attribute = session.query(WorkflowRoleAttribute).filter(
+                WorkflowRoleAttribute.role_id == role_id,
+                WorkflowRoleAttribute.key == key
+            ).first()
+            if attribute:
+                attribute.value = new_value
+                session.add(attribute) # Mark as modified
+                session.flush()
+                session.refresh(attribute)
+                return self._to_dict(attribute)
+            return None
+    
+    def update_workflow_actor_attribute(self, actor_id: str, key: str, new_value: str) -> Optional[Dict[str, Any]]:
+        """Update the value of a workflow actor attribute."""
+        with self.get_session() as session:
+            attribute = session.query(WorkflowActorAttribute).filter(
+                WorkflowActorAttribute.actor_id == actor_id,
+                WorkflowActorAttribute.key == key
+            ).first()
+            if attribute:
+                attribute.value = new_value
+                session.add(attribute) # Mark as modified
+                session.flush()
+                session.refresh(attribute)
+                return self._to_dict(attribute)
+            return None
+        
+    def update_workflow_instance_status(self, instance_id: str, new_status: str) -> Optional[Dict[str, Any]]:
+        """Update the status of a workflow instance."""
+        with self.get_session() as session:
+            instance = session.query(WorkflowInstance).filter(WorkflowInstance.id == instance_id).first()
+            if instance:
+                instance.status = new_status
+                session.add(instance) # Mark as modified
+                session.flush()
+                session.refresh(instance)
+                return self._to_dict(instance)
+            return None
+        
+    def update_workflow_unit_of_work_status(self, uow_id: str, new_status: str) -> Optional[Dict[str, Any]]:
+        """Update the status of a workflow unit of work."""
+        with self.get_session() as session:
+            uow = session.query(WorkflowUnitOfWork).filter(WorkflowUnitOfWork.id == uow_id).first()
+            if uow:
+                uow.status = new_status
+                session.add(uow) # Mark as modified
+                session.flush()
+                session.refresh(uow)
+                return self._to_dict(uow)
+            return None
+    
 
     def _to_dict(self, model) -> Dict[str, Any]:
         """Helper to convert SQLAlchemy model to dictionary."""
@@ -669,10 +1002,10 @@ class DatabaseManager:
                 "created_at": model.created_at.isoformat() if model.created_at else None,
                 "updated_at": model.updated_at.isoformat() if model.updated_at else None
             }
-        elif isinstance(model, WorkflowModelAttribute):
+        elif isinstance(model, WorkflowActorAttribute):
             return {
                 "id": model.id,
-                "workflow_id": model.workflow_id,
+                "actor_id": model.actor_id,
                 "key": model.key,
                 "value": model.value,
                 "description": model.description,

@@ -204,7 +204,8 @@ class Local_Roles(InstanceBase):
     linked_workflow = relationship(
         "Local_Workflows",
         foreign_keys=[linked_local_workflow_id],
-        post_update=True
+        post_update=True,
+        lazy='select'
     )
     components = relationship("Local_Components", back_populates="role", cascade="all, delete-orphan")
     assignments = relationship("Local_Actor_Role_Assignments", back_populates="role", cascade="all, delete-orphan")

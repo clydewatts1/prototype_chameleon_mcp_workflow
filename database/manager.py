@@ -6,7 +6,7 @@ to both Tier 1 (Templates) and Tier 2 (Instance) databases, ensuring
 complete air-gapped isolation between the two tiers.
 """
 
-from typing import Optional
+from typing import Optional, Generator
 from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
@@ -94,7 +94,7 @@ class DatabaseManager:
         return self._instance_engine
 
     @contextmanager
-    def get_template_session(self) -> Session:
+    def get_template_session(self) -> Generator[Session, None, None]:
         """
         Get a session for the Tier 1 (Templates) database.
 
@@ -118,7 +118,7 @@ class DatabaseManager:
             session.close()
 
     @contextmanager
-    def get_instance_session(self) -> Session:
+    def get_instance_session(self) -> Generator[Session, None, None]:
         """
         Get a session for the Tier 2 (Instance) database.
 

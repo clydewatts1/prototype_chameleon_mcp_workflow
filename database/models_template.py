@@ -133,7 +133,8 @@ class Template_Roles(TemplateBase):
     child_workflow = relationship(
         "Template_Workflows",
         foreign_keys=[child_workflow_id],
-        post_update=True
+        post_update=True,
+        lazy='select'
     )
     components = relationship("Template_Components", back_populates="role", cascade="all, delete-orphan")
 

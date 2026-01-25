@@ -62,11 +62,11 @@ Represents the `wf_workflow_interaction_components` table. Stores components tha
 - `updated_at` (DateTime): Last update timestamp (UTC)
 
 #### WorkflowRole
-Represents the `wf_workflow_roles` table. Stores roles that can be assigned in workflows.
+Represents the `wf_workflow_roles` table. Stores roles that can be assigned in workflows. Roles can be global (workflow_id is null) or workflow-specific.
 
 **Fields:**
 - `id` (String, PK): Unique role identifier
-- `workflow_id` (String, nullable): Optional workflow identifier reference
+- `workflow_id` (String, nullable): Optional workflow identifier. When null, the role is global; when set, the role is specific to that workflow
 - `name` (String): Role name
 - `type` (String): Role type
 - `description` (Text, nullable): Role description

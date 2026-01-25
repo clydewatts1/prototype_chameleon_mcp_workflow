@@ -28,6 +28,9 @@ prototype_chameleon_mcp_workflow/
 ├── common/                       # Common utilities
 │   ├── README.md                # Configuration documentation
 │   └── config.py                # Configuration management
+├── tools/                        # CLI utilities
+│   ├── __init__.py              # Module initialization
+│   └── workflow_manager.py       # Workflow template management CLI
 ├── tests/                        # Test files
 ├── requirements.txt              # Project dependencies
 ├── pyproject.toml               # Modern Python project configuration
@@ -154,6 +157,56 @@ The common module provides shared utilities:
 - Centralized configuration constants
 
 See [common/README.md](common/README.md) for usage examples.
+
+### Workflow Manager CLI
+
+The workflow manager is a command-line tool for managing Workflow Templates (Tier 1 Meta-Store). It provides three main features:
+
+**1. YAML Export** - Export workflow blueprints to human-readable YAML files:
+```bash
+# Export a workflow to YAML
+python tools/workflow_manager.py -w "MyWorkflow" -e
+
+# Export with custom filename
+python tools/workflow_manager.py -w "MyWorkflow" -e -f my_custom_name.yml
+```
+
+**2. YAML Import/Load** - Import and update workflow blueprints from YAML:
+```bash
+# Import a workflow from YAML
+python tools/workflow_manager.py -l -f workflow_MyWorkflow.yml
+
+# Re-importing will delete and recreate the workflow (cascade delete)
+python tools/workflow_manager.py -l -f modified_workflow.yml
+```
+
+**3. DOT Graph Export** - Generate visual workflow topology graphs:
+```bash
+# Export workflow as DOT graph
+python tools/workflow_manager.py -w "MyWorkflow" --graph
+
+# Export with custom filename
+python tools/workflow_manager.py -w "MyWorkflow" --graph -f my_graph.dot
+
+# Render the graph to PNG (requires Graphviz)
+dot -Tpng workflow_MyWorkflow.dot -o workflow_MyWorkflow.png
+```
+
+**Key Features:**
+- **Name-based references** - YAML uses entity names as identifiers instead of UUIDs for easy editing
+- **Cascade delete** - Re-importing a workflow automatically deletes the old version
+- **Transactional integrity** - All import operations use database transactions with automatic rollback on failure
+- **Visual topology** - DOT graphs show roles (circles), interactions (hexagons), and guardians (double octagons)
+
+**YAML Structure:**
+The exported YAML follows a hierarchical structure with all entities nested under the workflow:
+- `workflow` - Main workflow definition with name, description, version, and AI context
+- `roles` - Functional agents (ALPHA, BETA, OMEGA, EPSILON, TAU)
+- `interactions` - Waiting areas/queues between roles
+- `components` - Directional connections between roles and interactions
+- `guardians` - Logic gates attached to components
+
+Components and Guardians reference other entities by name (e.g., `role_name`, `component_name`), making the YAML easy to edit by hand and reload.
 
 ## 🔧 Development with AI Tools
 

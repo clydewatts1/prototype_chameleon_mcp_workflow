@@ -197,5 +197,3 @@ Per DATABASE_SCHEMA_SPEC.md, not all Tier 2 tables explicitly list instance_id. 
 ## Conclusion
 
 All requirements from the problem statement have been successfully implemented. The new database package provides a production-ready, air-gapped architecture that strictly follows DATABASE_SCHEMA_SPEC.md and WORKFLOW_CONSTITUTION.md specifications.
-
-The old workflow.py is now deprecated and can be removed or kept for reference. No code in the repository currently imports from the old module.

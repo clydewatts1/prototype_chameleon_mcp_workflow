@@ -1,0 +1,6 @@
+workflow:
+  name: Full_Lifecycle_Demo
+  description: A comprehensive test of all role types and guard logic.
+  version: 1
+  ai_context: null
+  schema_json: null

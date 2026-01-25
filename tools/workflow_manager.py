@@ -10,7 +10,7 @@ This tool handles:
 Usage:
     python tools/workflow_manager.py -w "MyWorkflow" -e           # Export YAML
     python tools/workflow_manager.py -i -f my_flow.yml           # Import YAML
-    python tools/workflow_manager.py -l                          # List all workflows
+    -                          # List all workflows
     python tools/workflow_manager.py -w "MyWorkflow" --graph     # Export DOT graph
 """
 
@@ -320,6 +320,40 @@ class WorkflowManager:
             # Session will commit on successful context exit
             return workflow_name
 
+    def delete_workflow(self, workflow_name: str) -> bool:
+        """
+        Delete a workflow template and all its related entities.
+
+        This will cascade delete all roles, interactions, components, and guardians
+        associated with the workflow.
+
+        Args:
+            workflow_name: Name of the workflow to delete.
+
+        Returns:
+            True if workflow was deleted, False if not found.
+
+        Raises:
+            Exception: If deletion fails.
+        """
+        with self.manager.get_template_session() as session:
+            # Look up the workflow by name
+            workflow = (
+                session.query(Template_Workflows)
+                .filter(Template_Workflows.name == workflow_name)
+                .first()
+            )
+
+            if not workflow:
+                return False
+
+            # Delete the workflow (cascade will handle related entities)
+            session.delete(workflow)
+            session.flush()
+
+            # Session will commit on successful context exit
+            return True
+
     def export_dot(self, workflow_name: str, filename: Optional[str] = None) -> str:
         """
         Export a workflow template as a DOT graph file.
@@ -355,12 +389,21 @@ class WorkflowManager:
                 "",
             ]
 
-            # Add Roles as circular nodes
+            # Add Roles as circular nodes with role-type specific colors and thick borders
+            role_colors = {
+                "ALPHA": "green",
+                "BETA": "blue",
+                "OMEGA": "black",
+                "EPSILON": "orange",
+                "TAU": "purple"
+            }
+            
             for role in workflow.roles:
                 label = role.name.replace('"', '\\"')
                 node_id = f'role_{role.name.replace(" ", "_")}'
+                color = role_colors.get(role.role_type, "gray")
                 dot_lines.append(
-                    f'  {node_id} [label="{label}", shape=circle, style=filled, fillcolor=lightblue];'
+                    f'  {node_id} [label="{label}", shape=circle, style=filled, fillcolor=lightgray, color={color}, penwidth=3];'
                 )
 
             # Add Interactions as hexagonal nodes
@@ -470,6 +513,9 @@ def main():
     parser.add_argument(
         "-l", "--list", action="store_true", help="List all workflows in the database"
     )
+    parser.add_argument(
+        "-d", "--delete", action="store_true", help="Delete a workflow and all its components"
+    )
     parser.add_argument("-f", "--file", help="YAML filename for import/export")
     parser.add_argument(
         "--graph", action="store_true", help="Export workflow as DOT graph"
@@ -483,14 +529,17 @@ def main():
     args = parser.parse_args()
 
     # Validate arguments
-    if not any([args.export, args.import_yaml, args.graph, args.list]):
-        parser.error("Must specify one of: -e/--export, -i/--import, -l/--list, or --graph")
+    if not any([args.export, args.import_yaml, args.graph, args.list, args.delete]):
+        parser.error("Must specify one of: -e/--export, -i/--import, -l/--list, -d/--delete, or --graph")
 
     if args.export and not args.workflow:
         parser.error("-e/--export requires -w/--workflow")
 
     if args.graph and not args.workflow:
         parser.error("--graph requires -w/--workflow")
+
+    if args.delete and not args.workflow:
+        parser.error("-d/--delete requires -w/--workflow")
 
     if args.import_yaml and not args.file:
         parser.error("-i/--import requires -f/--file")
@@ -520,6 +569,14 @@ def main():
                 print(f"\nTotal: {len(workflows)} workflow(s)")
             else:
                 print("No workflows found in database.")
+
+        elif args.delete:
+            deleted = manager.delete_workflow(args.workflow)
+            if deleted:
+                print(f"✓ Deleted workflow '{args.workflow}' and all its components (roles, interactions, components, guardians)")
+            else:
+                print(f"✗ Workflow '{args.workflow}' not found")
+                sys.exit(1)
 
         elif args.graph:
             output_file = manager.export_dot(args.workflow, args.file)

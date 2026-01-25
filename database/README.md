@@ -209,15 +209,6 @@ Run the example usage:
 python tests/example_usage.py
 ```
 
-## Migration from Old Schema
-
-The old `workflow.py` is **deprecated**. The new architecture provides:
-- Better separation of concerns
-- Stronger isolation guarantees
-- More flexible relationships
-- Complete AI introspection support
-- Production-ready design patterns
-
 ## References
 
 - **DATABASE_SCHEMA_SPEC.md**: Complete schema specification

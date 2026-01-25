@@ -1,0 +1,259 @@
+workflow:
+  name: "Invoice_Approval_Workflow"
+  description: "Complete invoice approval workflow demonstrating all component types"
+  version: 1
+  ai_context:
+    purpose: "Process and approve invoices with multiple validation stages"
+    business_rules: "Invoices over $10,000 require senior approval"
+  schema_json:
+    topology: "sequential with parallel approval paths"
+
+roles:
+  - name: "Invoice_Creator"
+    role_type: "ALPHA"
+    description: "Initiates the invoice approval workflow"
+    ai_context:
+      persona: "You are an invoice creation agent"
+      instructions: "Create well-formed invoice UOWs with all required fields"
+
+  - name: "Invoice_Validator"
+    role_type: "BETA"
+    strategy: "HOMOGENEOUS"
+    description: "Validates and decomposes invoice into line items"
+    ai_context:
+      persona: "You are a detail-oriented validator"
+      instructions: "Check all invoice fields and split into individual line items for approval"
+
+  - name: "Senior_Approver"
+    role_type: "BETA"
+    strategy: "HETEROGENEOUS"
+    description: "Reviews high-value invoices"
+    ai_context:
+      persona: "You are a senior financial approver"
+      instructions: "Review invoices over threshold for financial soundness"
+
+  - name: "Invoice_Reconciler"
+    role_type: "OMEGA"
+    description: "Reconciles all approvals and finalizes invoice"
+    ai_context:
+      persona: "You are a reconciliation specialist"
+      instructions: "Verify all child approvals complete before finalizing"
+
+  - name: "Error_Handler"
+    role_type: "EPSILON"
+    description: "Handles validation errors and data issues"
+    ai_context:
+      persona: "You are a problem solver"
+      instructions: "Fix data quality issues and validation failures"
+
+  - name: "Timeout_Manager"
+    role_type: "TAU"
+    description: "Manages approval timeouts and escalations"
+    ai_context:
+      persona: "You are a deadline enforcer"
+      instructions: "Escalate approvals that exceed time limits"
+
+interactions:
+  - name: "Pending_Validation_Queue"
+    description: "Queue for invoices awaiting validation"
+    ai_context:
+      purpose: "Holds newly created invoices before validation"
+
+  - name: "Approval_Queue"
+    description: "Queue for invoices awaiting approval"
+    ai_context:
+      purpose: "Holds validated invoices ready for approval decision"
+
+  - name: "Senior_Review_Queue"
+    description: "Queue for high-value invoices requiring senior review"
+    ai_context:
+      purpose: "Holds invoices over $10,000 for senior approval"
+
+  - name: "Reconciliation_Queue"
+    description: "Queue for approved invoices awaiting reconciliation"
+    ai_context:
+      purpose: "Holds approved line items waiting for parent reconciliation"
+
+  - name: "Error_Queue"
+    description: "Queue for invoices with errors"
+    ai_context:
+      purpose: "Holds invoices that failed validation or approval"
+
+  - name: "Timeout_Queue"
+    description: "Queue for timed-out approval requests"
+    ai_context:
+      purpose: "Holds invoices that exceeded approval time limits"
+
+  - name: "Completed_Queue"
+    description: "Queue for fully processed invoices"
+    ai_context:
+      purpose: "Final destination for successfully processed invoices"
+
+components:
+  - name: "Create_To_Validation"
+    role_name: "Invoice_Creator"
+    interaction_name: "Pending_Validation_Queue"
+    direction: "OUTBOUND"
+    description: "Route new invoices to validation queue"
+    ai_context:
+      data_flow: "Fresh invoice UOW with all metadata"
+
+  - name: "Validation_From_Queue"
+    role_name: "Invoice_Validator"
+    interaction_name: "Pending_Validation_Queue"
+    direction: "INBOUND"
+    description: "Validator pulls invoices from queue"
+    ai_context:
+      data_flow: "Retrieve next invoice for validation"
+
+  - name: "Validation_To_Approval"
+    role_name: "Invoice_Validator"
+    interaction_name: "Approval_Queue"
+    direction: "OUTBOUND"
+    description: "Send validated invoices to approval queue"
+    ai_context:
+      data_flow: "Validated invoice ready for approval"
+
+  - name: "Validation_To_Senior"
+    role_name: "Invoice_Validator"
+    interaction_name: "Senior_Review_Queue"
+    direction: "OUTBOUND"
+    description: "Route high-value invoices to senior review"
+    ai_context:
+      data_flow: "High-value invoice requiring senior oversight"
+
+  - name: "Validation_To_Error"
+    role_name: "Invoice_Validator"
+    interaction_name: "Error_Queue"
+    direction: "OUTBOUND"
+    description: "Send invalid invoices to error handler"
+    ai_context:
+      data_flow: "Invoice with validation failures"
+
+  - name: "Senior_From_Queue"
+    role_name: "Senior_Approver"
+    interaction_name: "Senior_Review_Queue"
+    direction: "INBOUND"
+    description: "Senior approver pulls from review queue"
+    ai_context:
+      data_flow: "Retrieve next high-value invoice"
+
+  - name: "Senior_To_Reconciliation"
+    role_name: "Senior_Approver"
+    interaction_name: "Reconciliation_Queue"
+    direction: "OUTBOUND"
+    description: "Send approved invoices to reconciliation"
+    ai_context:
+      data_flow: "Approved invoice ready for final processing"
+
+  - name: "Reconciler_From_Queue"
+    role_name: "Invoice_Reconciler"
+    interaction_name: "Reconciliation_Queue"
+    direction: "INBOUND"
+    description: "Reconciler pulls approved items"
+    ai_context:
+      data_flow: "Retrieve approved line items for reconciliation"
+
+  - name: "Reconciler_To_Complete"
+    role_name: "Invoice_Reconciler"
+    interaction_name: "Completed_Queue"
+    direction: "OUTBOUND"
+    description: "Send finalized invoices to completed queue"
+    ai_context:
+      data_flow: "Fully reconciled and approved invoice"
+
+  - name: "Error_From_Queue"
+    role_name: "Error_Handler"
+    interaction_name: "Error_Queue"
+    direction: "INBOUND"
+    description: "Error handler pulls failed invoices"
+    ai_context:
+      data_flow: "Retrieve invoice with errors to fix"
+
+  - name: "Error_To_Validation"
+    role_name: "Error_Handler"
+    interaction_name: "Pending_Validation_Queue"
+    direction: "OUTBOUND"
+    description: "Return fixed invoices to validation"
+    ai_context:
+      data_flow: "Corrected invoice ready for re-validation"
+
+  - name: "Timeout_From_Queue"
+    role_name: "Timeout_Manager"
+    interaction_name: "Timeout_Queue"
+    direction: "INBOUND"
+    description: "Timeout manager pulls stale approvals"
+    ai_context:
+      data_flow: "Retrieve timed-out approval requests"
+
+  - name: "Timeout_To_Senior"
+    role_name: "Timeout_Manager"
+    interaction_name: "Senior_Review_Queue"
+    direction: "OUTBOUND"
+    description: "Escalate timed-out invoices to senior review"
+    ai_context:
+      data_flow: "Escalated invoice requiring urgent attention"
+
+guardians:
+  - name: "Amount_Threshold_Guard"
+    component_name: "Validation_To_Senior"
+    type: "CRITERIA_GATE"
+    description: "Routes invoices over $10,000 to senior review"
+    config:
+      criteria: "amount > 10000"
+      field: "invoice_total"
+      threshold: 10000
+    ai_context:
+      logic: "Check invoice total and route to senior if over threshold"
+
+  - name: "Validation_Pass_Guard"
+    component_name: "Validation_To_Approval"
+    type: "PASS_THRU"
+    description: "Allows all validated invoices through"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Simple pass-through for validated invoices"
+
+  - name: "Error_Filter_Guard"
+    component_name: "Validation_To_Error"
+    type: "DIRECTIONAL_FILTER"
+    description: "Routes invoices with specific error types"
+    config:
+      error_types: ["missing_data", "invalid_format", "duplicate_invoice"]
+      routing_attribute: "error_type"
+    ai_context:
+      logic: "Filter and route based on error classification"
+
+  - name: "Cerberus_Reconciliation_Guard"
+    component_name: "Reconciler_From_Queue"
+    type: "CERBERUS"
+    description: "Ensures all child approvals complete before reconciliation"
+    config:
+      wait_for_children: true
+      min_children: 1
+      sync_strategy: "all_complete"
+    ai_context:
+      logic: "Three-headed guard ensuring all child UOWs are complete"
+
+  - name: "Senior_Approval_Gate"
+    component_name: "Senior_To_Reconciliation"
+    type: "CRITERIA_GATE"
+    description: "Ensures senior approval decision is recorded"
+    config:
+      criteria: "approval_status == 'approved'"
+      field: "approval_status"
+      required_value: "approved"
+    ai_context:
+      logic: "Only allow approved invoices to proceed to reconciliation"
+
+  - name: "Timeout_Threshold_Guard"
+    component_name: "Timeout_To_Senior"
+    type: "CRITERIA_GATE"
+    description: "Checks if invoice has exceeded time limit"
+    config:
+      criteria: "days_pending > 7"
+      field: "days_pending"
+      threshold: 7
+    ai_context:
+      logic: "Escalate invoices pending approval for more than 7 days"

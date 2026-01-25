@@ -1,0 +1,140 @@
+workflow:
+  name: "Full_Lifecycle_Demo"
+  description: "A comprehensive test of all role types and guard logic."
+  version: 1
+  ai_context:
+    goal: "Process high-value transactions with audit compliance."
+    risk_level: "High"
+  
+  roles:
+    - name: "Genesis"
+      type: "ALPHA"
+      description: "The workflow trigger that initiates the transaction."
+      ai_context: {"persona": "System Initiator"}
+    
+    - name: "Distributor"
+      type: "BETA"
+      strategy: "HOMOGENEOUS"
+      description: "Splits the transaction into individual line items."
+      ai_context: {"persona": "Batch Processor", "task": "Decomposition"}
+    
+    - name: "Finalizer"
+      type: "OMEGA"
+      description: "Reconciles all line items and closes the transaction."
+      ai_context: {"persona": "Archivist", "task": "Reconciliation"}
+    
+    - name: "Medic"
+      type: "EPSILON"
+      description: "Handles data validation errors and attempts auto-correction."
+      ai_context: {"persona": "Error Handler", "capabilities": ["retry", "flag"]}
+    
+    - name: "Watchdog"
+      type: "TAU"
+      description: "Manages stalled transactions and triggers timeouts."
+      ai_context: {"persona": "Timekeeper", "policy": "strict"}
+    
+    - name: "Human_Reviewer"
+      type: "HUMAN" 
+      description: "Manual approval step for high-value items."
+      ai_context: {"persona": "Senior Manager", "approval_limit": 50000}
+
+    - name: "Compliance_Bot"
+      type: "AI_AGENT"
+      description: "Automated fraud detection check."
+      ai_context: {"persona": "Auditor", "model": "fraud-detection-v1"}
+
+  interactions:
+    - name: "Inbound_Queue"
+      description: "Initial holding area for raw requests."
+    - name: "Processing_Pool"
+      description: "Work queue for decomposed items."
+    - name: "Review_Bin"
+      description: "Holding area for items awaiting human sign-off."
+    - name: "Audit_Log"
+      description: "Read-only log for compliance checks."
+    - name: "Hospital"
+      description: "Quarantine area for failed items."
+    - name: "Archive_Vault"
+      description: "Final destination for completed transactions."
+
+  components:
+    # --- Main Happy Path ---
+    # 1. Alpha -> Queue
+    - role: "Genesis"
+      interaction: "Inbound_Queue"
+      direction: "OUTBOUND"
+      name: "Alpha_to_Queue"
+    
+    # 2. Queue -> Beta (Decomposition)
+    - role: "Distributor"
+      interaction: "Inbound_Queue"
+      direction: "INBOUND"
+      name: "Queue_to_Beta"
+
+    # 3. Beta -> Processing Pool (With Criteria Gate)
+    - role: "Distributor"
+      interaction: "Processing_Pool"
+      direction: "OUTBOUND"
+      name: "Beta_to_Pool"
+      guardian:
+        type: "CRITERIA_GATE"
+        config: {"threshold": 100, "currency": "USD"}
+    
+    # 4. Pool -> Human Reviewer
+    - role: "Human_Reviewer"
+      interaction: "Processing_Pool"
+      direction: "INBOUND"
+      name: "Pool_to_Human"
+    
+    # 5. Human -> Review Bin
+    - role: "Human_Reviewer"
+      interaction: "Review_Bin"
+      direction: "OUTBOUND"
+      name: "Human_to_Bin"
+
+    # 6. Review Bin -> Finalizer (With Cerberus)
+    - role: "Finalizer"
+      interaction: "Review_Bin"
+      direction: "INBOUND"
+      name: "Bin_to_Omega"
+      guardian:
+        type: "CERBERUS"
+        config: {"synchronization": "strict_all_children"}
+
+    # --- Parallel Audit Path ---
+    # 7. Pool -> Auditor
+    - role: "Compliance_Bot"
+      interaction: "Processing_Pool"
+      direction: "INBOUND"
+      name: "Pool_to_Auditor"
+
+    # 8. Auditor -> Audit Log
+    - role: "Compliance_Bot"
+      interaction: "Audit_Log"
+      direction: "OUTBOUND"
+      name: "Auditor_to_Log"
+
+    # --- Exception Paths ---
+    # 9. Error Path (Beta -> Hospital)
+    - role: "Distributor"
+      interaction: "Hospital"
+      direction: "OUTBOUND"
+      name: "Beta_to_Hospital_Error"
+      guardian:
+        type: "CRITERIA_GATE"
+        config: {"condition": "validation_failed"}
+
+    # 10. Hospital -> Medic (Epsilon)
+    - role: "Medic"
+      interaction: "Hospital"
+      direction: "INBOUND"
+      name: "Hospital_to_Medic"
+
+    # 11. Timeout Path (Pool -> Watchdog)
+    - role: "Watchdog"
+      interaction: "Processing_Pool"
+      direction: "INBOUND"
+      name: "Pool_Timeout"
+      guardian:
+        type: "STANDARD"
+        config: {"timeout_seconds": 3600}

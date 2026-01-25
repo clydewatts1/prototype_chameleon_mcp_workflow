@@ -19,6 +19,9 @@ class RoleType(str, Enum):
     OMEGA = "OMEGA"  # The Terminal - reconciles and finalizes the complete UOW set
     EPSILON = "EPSILON"  # The Physician - error handling role for remediating explicit data failures
     TAU = "TAU"      # The Chronometer - timeout role for managing stale or expired tokens
+    HUMAN = "HUMAN"  # Human-in-the-loop role for manual intervention
+    AI_AGENT = "AI_AGENT"  # AI-driven role for autonomous processing
+    AUTO = "AUTO"  # System automated role for background tasks
 
 
 class DecompositionStrategy(str, Enum):

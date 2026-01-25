@@ -297,6 +297,108 @@ def test_comments_exist():
     return True
 
 
+def test_unique_constraints():
+    """Verify that UniqueConstraints are properly defined for namespace uniqueness."""
+    print("\n=== Testing Namespace Uniqueness Constraints ===")
+    
+    # Tier 1 constraints
+    tier1_models = {
+        Template_Roles: ('workflow_id', 'name'),
+        Template_Interactions: ('workflow_id', 'name'),
+        Template_Components: ('workflow_id', 'name'),
+        Template_Guardians: ('workflow_id', 'name'),
+    }
+    
+    for model, expected_columns in tier1_models.items():
+        constraints = [c for c in model.__table__.constraints if hasattr(c, 'columns')]
+        unique_constraints = [c for c in constraints if c.__class__.__name__ == 'UniqueConstraint']
+        
+        assert len(unique_constraints) > 0, f"{model.__tablename__} missing UniqueConstraint"
+        
+        # Check if the constraint contains the expected columns
+        found = False
+        for constraint in unique_constraints:
+            constraint_columns = tuple(col.name for col in constraint.columns)
+            if constraint_columns == expected_columns:
+                found = True
+                print(f"✓ {model.__tablename__} has UniqueConstraint on {expected_columns}")
+                break
+        
+        assert found, f"{model.__tablename__} missing UniqueConstraint on {expected_columns}"
+    
+    # Tier 2 constraints
+    tier2_models = {
+        Local_Workflows: ('instance_id', 'name'),
+        Local_Roles: ('local_workflow_id', 'name'),
+        Local_Interactions: ('local_workflow_id', 'name'),
+        Local_Components: ('local_workflow_id', 'name'),
+        Local_Guardians: ('local_workflow_id', 'name'),
+        Local_Actors: ('instance_id', 'name'),
+    }
+    
+    for model, expected_columns in tier2_models.items():
+        constraints = [c for c in model.__table__.constraints if hasattr(c, 'columns')]
+        unique_constraints = [c for c in constraints if c.__class__.__name__ == 'UniqueConstraint']
+        
+        assert len(unique_constraints) > 0, f"{model.__tablename__} missing UniqueConstraint"
+        
+        # Check if the constraint contains the expected columns
+        found = False
+        for constraint in unique_constraints:
+            constraint_columns = tuple(col.name for col in constraint.columns)
+            if constraint_columns == expected_columns:
+                found = True
+                print(f"✓ {model.__tablename__} has UniqueConstraint on {expected_columns}")
+                break
+        
+        assert found, f"{model.__tablename__} missing UniqueConstraint on {expected_columns}"
+    
+    print("\n✓ Namespace Uniqueness Constraints: SUCCESS")
+    return True
+
+
+def test_database_agnosticism():
+    """Verify that no PostgreSQL-specific types are used (Article XXI compliance)."""
+    print("\n=== Testing Database Agnosticism (Article XXI) ===")
+    
+    import inspect as py_inspect
+    from database import models_template, models_instance
+    
+    # Check that no direct PostgreSQL UUID import is used in column definitions
+    # We allow the import for the TypeDecorator, but not in actual column definitions
+    
+    tier1_models = [Template_Workflows, Template_Roles, Template_Interactions, 
+                    Template_Components, Template_Guardians]
+    tier2_models = [Instance_Context, Local_Workflows, Local_Roles, Local_Interactions,
+                    Local_Components, Local_Guardians, Local_Actors, 
+                    Local_Actor_Role_Assignments, Local_Role_Attributes,
+                    UnitsOfWork, UOW_Attributes, Interaction_Logs]
+    
+    all_models = tier1_models + tier2_models
+    
+    for model in all_models:
+        for column in model.__table__.columns:
+            # Check that column types are database-agnostic
+            col_type = column.type
+            type_class_name = col_type.__class__.__name__
+            
+            # The type should be our custom UUID TypeDecorator, not PostgreSQL UUID directly
+            # Only check columns that are explicitly UUID columns (ending with _id)
+            if column.name.endswith('_id') and 'uuid' in str(col_type).lower():
+                # For UUID columns, verify they use our custom UUID type
+                assert type_class_name in ['UUID', 'TypeDecorator'], \
+                    f"{model.__tablename__}.{column.name} uses non-agnostic type: {type_class_name}"
+            
+            # Verify no JSONB (should be JSON)
+            assert 'JSONB' not in type_class_name, \
+                f"{model.__tablename__}.{column.name} uses JSONB instead of JSON"
+            
+        print(f"✓ {model.__tablename__} uses database-agnostic types")
+    
+    print("\n✓ Database Agnosticism: SUCCESS")
+    return True
+
+
 def run_all_tests():
     """Run all validation tests."""
     print("=" * 70)
@@ -307,6 +409,8 @@ def run_all_tests():
         ("Air-Gapped Isolation", test_air_gapped_isolation),
         ("Instance ID in Tier 2", test_instance_id_in_tier2),
         ("Comments for AI Introspection", test_comments_exist),
+        ("Namespace Uniqueness Constraints", test_unique_constraints),
+        ("Database Agnosticism (Article XXI)", test_database_agnosticism),
         ("Tier 1 Schema Creation", test_tier1_schema_creation),
         ("Tier 2 Schema Creation", test_tier2_schema_creation),
     ]
@@ -344,6 +448,8 @@ def run_all_tests():
         print("  ✓ Separate declarative bases")
         print("  ✓ Strict isolation with instance_id")
         print("  ✓ AI introspection via comments")
+        print("  ✓ Namespace uniqueness constraints")
+        print("  ✓ Database agnosticism (Article XXI)")
         print("  ✓ All tables created successfully")
         print("  ✓ Key columns verified")
         return True

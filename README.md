@@ -28,10 +28,17 @@ prototype_chameleon_mcp_workflow/
 ├── streamlit_client/             # Web UI client
 │   ├── __init__.py              # Streamlit client module
 │   └── app.py                   # Streamlit application
+├── database/                     # Database module
+│   ├── README.md                # Database documentation
+│   └── workflow.py              # SQLAlchemy models and DatabaseManager
+├── common/                       # Common utilities
+│   ├── README.md                # Configuration documentation
+│   └── config.py                # Configuration management
 ├── requirements.txt              # Project dependencies
 ├── pyproject.toml               # Modern Python project configuration
 ├── setup.py                     # Package setup script
 ├── .env.example                 # Environment variables template
+├── verify_setup.py              # Setup verification script
 └── README.md                    # This file
 ```
 
@@ -173,6 +180,33 @@ The Streamlit client provides an intuitive web interface for:
 - Workflow analytics and history
 - Interactive debugging
 
+### Database Module
+
+The database module provides comprehensive data persistence using SQLAlchemy ORM:
+- **11 data models** covering workflows, roles, interactions, instances, and units of work
+- **DatabaseManager** class with complete CRUD operations
+- Support for SQLite, PostgreSQL, MySQL, and other SQLAlchemy-compatible databases
+- Automatic schema creation and timestamp management with `TimestampMixIn`
+
+**Key Tables:**
+- Workflows and attributes
+- Roles and role attributes
+- Interactions and components
+- Workflow instances
+- Units of work and types
+
+See [database/README.md](database/README.md) for detailed documentation.
+
+### Common Module
+
+The common module provides shared utilities:
+- **Configuration management** through the `Config` class
+- Environment variable loading from `.env` files
+- Type-safe getters for strings, integers, and booleans
+- Centralized configuration constants
+
+See [common/README.md](common/README.md) for usage examples.
+
 ## 🔧 Development with AI Tools
 
 This project is designed to work with modern AI-assisted development tools:
@@ -201,11 +235,20 @@ import antigravity  # Opens XKCD comic about Python
 - **uvicorn** - ASGI server for FastAPI
 - **streamlit** - Web UI framework
 - **pydantic** - Data validation and settings management
+- **pydantic-settings** - Settings management
 - **httpx** - Async HTTP client
+- **aiohttp** - Async HTTP support
 - **python-dotenv** - Environment variable management
+- **loguru** - Logging and monitoring
+- **sqlalchemy** - ORM for database operations
+- **teradatasqlalchemy** - Teradata database support
+- **jinja2** - Template rendering
+- **PyYAML** - YAML configuration file support
 
 ### Development Dependencies
 - **pytest** - Testing framework
+- **pytest-asyncio** - Async test support
+- **pytest-cov** - Code coverage reporting
 - **ruff** - Fast Python linter
 - **black** - Code formatter
 - **mypy** - Static type checker

@@ -72,8 +72,8 @@ class Template_Workflows(TemplateBase):
         cascade="all, delete-orphan"
     )
     interactions = relationship("Template_Interactions", back_populates="workflow", cascade="all, delete-orphan")
-    components = relationship("Template_Components", foreign_keys="Template_Components.workflow_id", back_populates="workflow", cascade="all, delete-orphan")
-    guardians = relationship("Template_Guardians", foreign_keys="Template_Guardians.workflow_id", back_populates="workflow", cascade="all, delete-orphan")
+    components = relationship("Template_Components", foreign_keys=["Template_Components.workflow_id"], back_populates="workflow", cascade="all, delete-orphan")
+    guardians = relationship("Template_Guardians", foreign_keys=["Template_Guardians.workflow_id"], back_populates="workflow", cascade="all, delete-orphan")
 
 
 class Template_Roles(TemplateBase):
@@ -234,7 +234,7 @@ class Template_Components(TemplateBase):
     )
 
     # Relationships
-    workflow = relationship("Template_Workflows", foreign_keys=[workflow_id])
+    workflow = relationship("Template_Workflows", foreign_keys=[workflow_id], back_populates="components")
     interaction = relationship("Template_Interactions", back_populates="components")
     role = relationship("Template_Roles", back_populates="components")
     guardians = relationship("Template_Guardians", back_populates="component", cascade="all, delete-orphan")

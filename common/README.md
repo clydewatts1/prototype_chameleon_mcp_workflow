@@ -115,3 +115,16 @@ try:
 except ValueError:
     print("MAX_CONNECTIONS must be a valid integer")
 ```
+
+## Module-Level Constants
+
+The config module provides commonly used configuration constants at module level:
+
+```python
+from common.config import DATABASE_URL
+
+# DATABASE_URL is pre-loaded from environment variable or defaults to:
+# "sqlite:///./chameleon_workflow.db"
+```
+
+This allows for convenient import of configuration values without instantiating the `Config` class.

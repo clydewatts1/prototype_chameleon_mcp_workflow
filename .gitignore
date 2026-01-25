@@ -66,6 +66,10 @@ tier1_templates.db
 tier2_instance.db
 *.db
 
+# Generated workflow files (examples/artifacts)
+workflow_*.yml
+workflow_*.dot
+
 # Flask stuff:
 instance/
 .webassets-cache

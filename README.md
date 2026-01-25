@@ -4,11 +4,7 @@ A Model Context Protocol (MCP) workflow server for orchestrating AI agent workfl
 
 ## 🎯 Overview
 
-The Chameleon MCP Workflow project provides infrastructure for orchestrating AI agent workflows with three main components:
-
-1. **Chameleon Workflow Engine** - Core workflow orchestration server
-2. **MCP Workflow Server** - MCP protocol interface for AI assistants
-3. **Streamlit Client** - Web-based UI for workflow management
+The Chameleon MCP Workflow project provides infrastructure for orchestrating AI agent workflows.
 
 This project is designed to work seamlessly with:
 - 🤖 **GitHub Copilot** - AI pair programming assistant
@@ -20,26 +16,23 @@ This project is designed to work seamlessly with:
 ```
 prototype_chameleon_mcp_workflow/
 ├── chameleon_workflow_engine/    # Workflow engine server
-│   ├── __init__.py              # Module initialization with architecture docs
+│   ├── __init__.py              # Module initialization
 │   └── server.py                # FastAPI-based workflow engine
-├── mcp_workflow_server/          # MCP protocol server
-│   ├── __init__.py              # MCP server module
-│   └── server.py                # MCP protocol implementation
-├── streamlit_client/             # Web UI client
-│   ├── __init__.py              # Streamlit client module
-│   └── app.py                   # Streamlit application
 ├── database/                     # Database module
+│   ├── __init__.py              # Package exports
 │   ├── README.md                # Database documentation
-│   └── workflow.py              # SQLAlchemy models and DatabaseManager
+│   ├── models_template.py        # Tier 1 template models
+│   ├── models_instance.py        # Tier 2 instance models
+│   ├── manager.py               # DatabaseManager
+│   └── enums.py                 # Database enumerations
 ├── common/                       # Common utilities
 │   ├── README.md                # Configuration documentation
 │   └── config.py                # Configuration management
+├── tests/                        # Test files
 ├── requirements.txt              # Project dependencies
 ├── pyproject.toml               # Modern Python project configuration
 ├── setup.py                     # Package setup script
-├── .env.example                 # Environment variables template
-├── verify_setup.py              # Setup verification script
-└── README.md                    # This file
+└── verify_setup.py              # Setup verification script
 ```
 
 ## 🚀 Quick Start
@@ -118,30 +111,7 @@ The API will be available at: `http://localhost:8000`
 - API Documentation: `http://localhost:8000/docs`
 - Health Check: `http://localhost:8000/health`
 
-#### 2. Start the MCP Workflow Server
-
-The MCP server provides a standardized interface for AI assistants.
-
-```bash
-# Start the MCP server
-python -m mcp_workflow_server.server
-```
-
-The MCP server will connect to the workflow engine at `http://localhost:8000`
-
-#### 3. Start the Streamlit Client
-
-The Streamlit client provides a web-based UI for workflow management.
-
-```bash
-# Start the Streamlit app
-streamlit run streamlit_client/app.py
-
-# Or with custom port
-streamlit run streamlit_client/app.py --server.port 8501
-```
-
-The UI will be available at: `http://localhost:8501`
+#### 2. Verify your setup
 
 ## 🏗️ Component Architecture
 
@@ -159,41 +129,19 @@ The workflow engine is built with FastAPI and provides REST API endpoints for:
 - Event-driven architecture
 - RESTful API interface
 
-### MCP Workflow Server
-
-The MCP server implements the Model Context Protocol, enabling AI assistants like Claude to:
-- Discover available workflow capabilities
-- Execute workflows programmatically
-- Query workflow state and results
-- Integrate with the broader AI ecosystem
-
-**MCP Capabilities:**
-- **Resources**: Workflow definitions and templates
-- **Tools**: Workflow operations (create, execute, monitor)
-- **Prompts**: Pre-defined workflow patterns
-
-### Streamlit Client
-
-The Streamlit client provides an intuitive web interface for:
-- Visual workflow creation
-- Real-time execution monitoring
-- Workflow analytics and history
-- Interactive debugging
-
 ### Database Module
 
-The database module provides comprehensive data persistence using SQLAlchemy ORM:
-- **11 data models** covering workflows, roles, interactions, instances, and units of work
-- **DatabaseManager** class with complete CRUD operations
+The database module provides comprehensive data persistence using SQLAlchemy ORM with an air-gapped architecture:
+- **Tier 1 Models** - Template/blueprint definitions for workflow schemas
+- **Tier 2 Models** - Runtime instance data with strict isolation
+- **DatabaseManager** class for managing both tiers
 - Support for SQLite, PostgreSQL, MySQL, and other SQLAlchemy-compatible databases
-- Automatic schema creation and timestamp management with `TimestampMixIn`
 
-**Key Tables:**
-- Workflows and attributes
-- Roles and role attributes
-- Interactions and components
-- Workflow instances
-- Units of work and types
+**Key Features:**
+- Complete air-gapped template and instance separation
+- Automatic schema creation and management
+- Comprehensive enums for workflow types and roles
+- Full support for recursive workflows and memory hierarchy
 
 See [database/README.md](database/README.md) for detailed documentation.
 
@@ -260,7 +208,7 @@ import antigravity  # Opens XKCD comic about Python
 pytest
 
 # Run with coverage
-pytest --cov=chameleon_workflow_engine --cov=mcp_workflow_server --cov=streamlit_client
+pytest --cov=chameleon_workflow_engine --cov=database
 
 # Run specific test file
 pytest tests/test_workflow_engine.py
@@ -280,6 +228,7 @@ pytest tests/test_workflow_engine.py
 
 3. **Test your changes**
    ```bash
+   python verify_setup.py
    pytest
    ruff check .
    black --check .

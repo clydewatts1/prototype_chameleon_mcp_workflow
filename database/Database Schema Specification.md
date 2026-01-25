@@ -2,7 +2,7 @@
 
 **Architecture:** Air-Gapped Instantiation (Physical & Logical Isolation)
 
-**Version:** 3.6 (AI Introspection Standard)
+**Version:** 3.7 (Namespace Uniqueness & Agnosticism)
 
 This specification defines a strict **Two-Database Architecture** designed for absolute independence.
 
@@ -20,7 +20,7 @@ This specification defines a strict **Two-Database Architecture** designed for a
 *Description:* Defines the high-level container for a workflow blueprint.
 
 * workflow\_id: UUID (Primary Key) \- Unique identifier for the blueprint.  
-* name: String (Short Identifier) \- Human-readable system name (e.g., "Invoice\_Approval\_Flow").  
+* name: String (Short Identifier) \- Human-readable system name. **Must be unique per version.**  
 * description: Text (Human Readable) \- Detailed documentation of what this workflow achieves.  
 * ai\_context: JSONB \- Model-specific prompts/descriptions used to prime AI agents about the overall workflow goal.  
 * version: Integer \- Incremental version number; updated whenever the structure (roles, edges) changes.  
@@ -33,9 +33,9 @@ This specification defines a strict **Two-Database Architecture** designed for a
 
 * role\_id: UUID (PK) \- Unique identifier for the role definition.  
 * workflow\_id: UUID (FK \-\> Template\_Workflows) \- The blueprint this role belongs to.  
-* name: String \- Display name of the role (e.g., "Senior\_Auditor").  
+* name: String \- Display name of the role. **Must be unique within the workflow\_id namespace.**  
 * description: Text \- Human-readable description of responsibilities.  
-* ai\_context: JSONB \- Specific instructions for AI agents assigned to this role (e.g., "You are a skeptical auditor...").  
+* ai\_context: JSONB \- Specific instructions for AI agents assigned to this role.  
 * role\_type: Enum \- Functional classification (![][image1], ![][image2], ![][image3], ![][image4], ![][image5]).  
 * strategy: Enum \- Decomposition strategy (HOMOGENEOUS/HETEROGENEOUS) for Beta roles.  
 * child\_workflow\_id: UUID (Nullable, FK \-\> Template\_Workflows) \- If set, this Role acts as a Recursive Gateway triggering this referenced blueprint.
@@ -46,7 +46,7 @@ This specification defines a strict **Two-Database Architecture** designed for a
 
 * interaction\_id: UUID (PK) \- Unique identifier.  
 * workflow\_id: UUID (FK \-\> Template\_Workflows) \- Parent blueprint.  
-* name: String \- System name (e.g., "Pending\_Approval\_Queue").  
+* name: String \- System name. **Must be unique within the workflow\_id namespace.**  
 * description: Text \- Documentation of what UOW state resides here.  
 * ai\_context: JSONB \- Context for agents observing this interaction.
 
@@ -55,10 +55,11 @@ This specification defines a strict **Two-Database Architecture** designed for a
 *Description:* Defines the topology (directional pipes) linking Roles and Interactions.
 
 * component\_id: UUID (PK) \- Unique identifier.  
+* workflow\_id: UUID (FK \-\> Template\_Workflows) \- **Added for Namespace Scope.**  
 * interaction\_id: UUID (FK) \- The interaction endpoint.  
 * role\_id: UUID (FK) \- The role endpoint.  
 * direction: Enum \- Flow direction relative to the Role (INBOUND/OUTBOUND).  
-* name: String \- Descriptive name of the connection path.  
+* name: String \- Descriptive name. **Must be unique within the workflow\_id namespace.**  
 * description: Text \- Documentation of the data flow.  
 * ai\_context: JSONB \- Semantic description of this specific data pipe.
 
@@ -67,8 +68,9 @@ This specification defines a strict **Two-Database Architecture** designed for a
 *Description:* Defines the active logic gates attached to components.
 
 * guardian\_id: UUID (PK) \- Unique identifier.  
+* workflow\_id: UUID (FK \-\> Template\_Workflows) \- **Added for Namespace Scope.**  
 * component\_id: UUID (FK) \- The specific pipe this guard protects.  
-* name: String \- Name of the guard logic.  
+* name: String \- Name of the guard logic. **Must be unique within the workflow\_id namespace.**  
 * description: Text \- Explanation of the gating criteria.  
 * ai\_context: JSONB \- Instructions for AI agents acting as the guard.  
 * type: Enum \- Logic type (CERBERUS, PASS\_THRU, CRITERIA\_GATE, etc.).  
@@ -89,7 +91,7 @@ This specification defines a strict **Two-Database Architecture** designed for a
 *Description:* Represents the "World" or "Tenant" for this deployment. It is the root of the isolation boundary.
 
 * instance\_id: UUID (Primary Key) \- The Global ID for this specific deployment.  
-* name: String \- Display name (e.g., "Finance\_Dept\_Instance").  
+* name: String \- Display name. **Must be unique globally.**  
 * description: Text \- Operational notes.  
 * status: Enum \- Deployment health (ACTIVE, PAUSED, ARCHIVED).  
 * deployment\_date: Timestamp \- When this instance was cloned from the meta-store.
@@ -105,7 +107,7 @@ These tables are populated by deep-copying from Tier 1\. A single Instance can h
 * local\_workflow\_id: UUID (PK) \- Unique ID for this workflow within this instance.  
 * instance\_id: UUID (FK \-\> Instance\_Context) \- The parent container.  
 * original\_workflow\_id: UUID (Reference to Tier 1\) \- Traceability link to the source blueprint.  
-* name: String \- Local name of the workflow.  
+* name: String \- Local name of the workflow. **Must be unique within the instance\_id namespace.**  
 * description: Text \- Local description.  
 * ai\_context: JSONB \- Localized AI prompts.  
 * version: Integer \- The version of the blueprint used for this snapshot.  
@@ -118,7 +120,7 @@ These tables are populated by deep-copying from Tier 1\. A single Instance can h
 
 * role\_id: UUID (PK) \- Local unique identifier.  
 * local\_workflow\_id: UUID (FK \-\> Local\_Workflows) \- Parent local workflow.  
-* name: String \- Role Name.  
+* name: String \- Role Name. **Must be unique within the local\_workflow\_id namespace.**  
 * description: Text \- Description.  
 * ai\_context: JSONB \- AI Instructions.  
 * role\_type: Enum \- (![][image6]).  
@@ -132,7 +134,7 @@ These tables are populated by deep-copying from Tier 1\. A single Instance can h
 
 * interaction\_id: UUID (PK) \- Local unique identifier.  
 * local\_workflow\_id: UUID (FK \-\> Local\_Workflows) \- Parent local workflow.  
-* name: String \- Interaction Name.  
+* name: String \- Interaction Name. **Must be unique within the local\_workflow\_id namespace.**  
 * description: Text \- Description.  
 * ai\_context: JSONB \- AI Context.  
 * stale\_token\_limit\_seconds: Integer \- Runtime configuration for Timeout (Chronos) logic.
@@ -146,7 +148,7 @@ These tables are populated by deep-copying from Tier 1\. A single Instance can h
 * interaction\_id: UUID (FK \-\> Local\_Interactions) \- Connection Endpoint A.  
 * role\_id: UUID (FK \-\> Local\_Roles) \- Connection Endpoint B.  
 * direction: Enum \- Flow direction.  
-* name: String \- Component Name.  
+* name: String \- Component Name. **Must be unique within the local\_workflow\_id namespace.**  
 * description: Text \- Description.  
 * ai\_context: JSONB \- AI Context.
 
@@ -157,7 +159,7 @@ These tables are populated by deep-copying from Tier 1\. A single Instance can h
 * guardian\_id: UUID (PK) \- Local unique identifier.  
 * local\_workflow\_id: UUID (FK \-\> Local\_Workflows) \- Parent local workflow.  
 * component\_id: UUID (FK \-\> Local\_Components) \- The pipe being guarded.  
-* name: String \- Guard Name.  
+* name: String \- Guard Name. **Must be unique within the local\_workflow\_id namespace.**  
 * description: Text \- Description.  
 * ai\_context: JSONB \- AI Context.  
 * type: Enum \- Logic Class (CERBERUS, PASS\_THRU, etc.).  
@@ -173,8 +175,8 @@ These tables are populated by deep-copying from Tier 1\. A single Instance can h
 
 * actor\_id: UUID (PK) \- Unique ID for the actor in this instance.  
 * instance\_id: UUID (FK \-\> Instance\_Context) \- The container.  
-* identity\_key: String \- External reference ID (e.g., email or system-agent-ID).  
-* name: String \- Display name.  
+* identity\_key: String \- External reference ID.  
+* name: String \- Display name. **Must be unique within the instance\_id namespace.**  
 * description: Text \- Description of capabilities.  
 * ai\_context: JSONB \- System prompts or Persona definitions specific to this instance.  
 * type: Enum \- (HUMAN, AI\_AGENT, SYSTEM).  

@@ -103,10 +103,10 @@ Write tests for new features:
 pytest
 
 # Run with coverage
-pytest --cov=chameleon_workflow_engine --cov=mcp_workflow_server --cov=streamlit_client
+pytest --cov=chameleon_workflow_engine --cov=database
 
 # Run specific test
-pytest tests/test_workflow_engine.py
+pytest tests/test_schema_generation.py
 ```
 
 ## 📦 Project Structure
@@ -116,15 +116,13 @@ prototype_chameleon_mcp_workflow/
 ├── chameleon_workflow_engine/    # Core workflow orchestration
 │   ├── __init__.py              # Module with architecture docs
 │   └── server.py                # FastAPI server
-├── mcp_workflow_server/          # MCP protocol interface
-│   ├── __init__.py              # MCP server module
-│   └── server.py                # MCP implementation
-├── streamlit_client/             # Web UI
-│   ├── __init__.py              # Client module
-│   └── app.py                   # Streamlit app
 ├── database/                     # Database module
+│   ├── __init__.py              # Package exports
 │   ├── README.md                # Database documentation
-│   └── workflow.py              # SQLAlchemy models and DatabaseManager
+│   ├── models_template.py        # Tier 1 template models
+│   ├── models_instance.py        # Tier 2 instance models
+│   ├── manager.py               # DatabaseManager
+│   └── enums.py                 # Database enumerations
 ├── common/                       # Common utilities
 │   ├── README.md                # Configuration documentation
 │   └── config.py                # Configuration management
@@ -185,8 +183,6 @@ prototype_chameleon_mcp_workflow/
 ## 🎯 Areas for Contribution
 
 - **Workflow Engine**: Add new workflow patterns and execution strategies
-- **MCP Server**: Enhance MCP protocol implementation
-- **Streamlit Client**: Improve UI/UX and add visualizations
 - **Database Module**: Add new models, optimize queries, enhance data management
 - **Common Module**: Add utilities, improve configuration handling
 - **Documentation**: Improve guides and API docs

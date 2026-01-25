@@ -97,6 +97,21 @@ def test_tier1_schema_creation():
         assert 'child_workflow_id' in roles_columns, "child_workflow_id not found in template_roles"
         print("✓ Template_Roles has required columns")
         
+        # Template_Components columns (verify workflow_id for namespace scope)
+        components_columns = [col['name'] for col in inspector.get_columns('template_components')]
+        assert 'component_id' in components_columns, "component_id not found in template_components"
+        assert 'workflow_id' in components_columns, "workflow_id not found in template_components (required for namespace scope)"
+        assert 'interaction_id' in components_columns, "interaction_id not found in template_components"
+        assert 'role_id' in components_columns, "role_id not found in template_components"
+        print("✓ Template_Components has required columns including workflow_id")
+        
+        # Template_Guardians columns (verify workflow_id for namespace scope)
+        guardians_columns = [col['name'] for col in inspector.get_columns('template_guardians')]
+        assert 'guardian_id' in guardians_columns, "guardian_id not found in template_guardians"
+        assert 'workflow_id' in guardians_columns, "workflow_id not found in template_guardians (required for namespace scope)"
+        assert 'component_id' in guardians_columns, "component_id not found in template_guardians"
+        print("✓ Template_Guardians has required columns including workflow_id")
+        
         manager.close()
         print("\n✓ Tier 1 Schema Creation: SUCCESS")
         return True

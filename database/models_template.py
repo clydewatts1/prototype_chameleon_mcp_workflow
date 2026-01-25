@@ -72,6 +72,8 @@ class Template_Workflows(TemplateBase):
         cascade="all, delete-orphan"
     )
     interactions = relationship("Template_Interactions", back_populates="workflow", cascade="all, delete-orphan")
+    components = relationship("Template_Components", foreign_keys="Template_Components.workflow_id", back_populates="workflow", cascade="all, delete-orphan")
+    guardians = relationship("Template_Guardians", foreign_keys="Template_Guardians.workflow_id", back_populates="workflow", cascade="all, delete-orphan")
 
 
 class Template_Roles(TemplateBase):
@@ -194,6 +196,12 @@ class Template_Components(TemplateBase):
         default=uuid.uuid4,
         comment="Unique identifier."
     )
+    workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("template_workflows.workflow_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="The blueprint this component belongs to (Added for Namespace Scope)."
+    )
     interaction_id = Column(
         UUID(as_uuid=True),
         ForeignKey("template_interactions.interaction_id", ondelete="CASCADE"),
@@ -226,6 +234,7 @@ class Template_Components(TemplateBase):
     )
 
     # Relationships
+    workflow = relationship("Template_Workflows", foreign_keys=[workflow_id], back_populates="components")
     interaction = relationship("Template_Interactions", back_populates="components")
     role = relationship("Template_Roles", back_populates="components")
     guardians = relationship("Template_Guardians", back_populates="component", cascade="all, delete-orphan")
@@ -245,6 +254,12 @@ class Template_Guardians(TemplateBase):
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique identifier."
+    )
+    workflow_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("template_workflows.workflow_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="The blueprint this guardian belongs to (Added for Namespace Scope)."
     )
     component_id = Column(
         UUID(as_uuid=True),
@@ -276,4 +291,5 @@ class Template_Guardians(TemplateBase):
     )
 
     # Relationships
+    workflow = relationship("Template_Workflows", foreign_keys=[workflow_id], back_populates="guardians")
     component = relationship("Template_Components", back_populates="guardians")

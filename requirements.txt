@@ -16,13 +16,23 @@ httpx>=0.25.0
 aiohttp>=3.9.0
 
 # Configuration and environment
-python-dotenv
+python-dotenv>=1.0.0
 
 # Logging and monitoring
 loguru>=0.7.0
 
 # Data handling
 pydantic-settings>=2.0.0
+
+# Database
+sqlalchemy>=2.0.0
+teradatasqlalchemy>=17.0.0
+
+# Template rendering
+jinja2>=3.1.0
+
+# Configuration file support
+PyYAML>=6.0.1
 
 # Testing (optional, for development)
 pytest>=7.4.0
@@ -37,12 +47,3 @@ mypy>=1.5.0
 # AI Integration support
 # Note: GitHub Copilot, Claude, and Antigravity are used during development
 # Antigravity is part of Python standard library (easter egg)
-
-fastapi>=0.104.0
-uvicorn>=0.24.0
-pydantic>=2.0.0
-sqlalchemy>=2.0.0 
-teradatasqlalchemy>=17.0.0  
-jinja2>=3.1.0
-# Add PyYAML for loading config
-PyYAML>=6.0.1

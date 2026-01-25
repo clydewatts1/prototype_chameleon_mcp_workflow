@@ -9,7 +9,8 @@ This tool handles:
 
 Usage:
     python tools/workflow_manager.py -w "MyWorkflow" -e           # Export YAML
-    python tools/workflow_manager.py -l -f my_flow.yml           # Import YAML
+    python tools/workflow_manager.py -i -f my_flow.yml           # Import YAML
+    python tools/workflow_manager.py -l                          # List all workflows
     python tools/workflow_manager.py -w "MyWorkflow" --graph     # Export DOT graph
 """
 
@@ -432,6 +433,20 @@ class WorkflowManager:
 
             return str(output_path.absolute())
 
+    def list_workflows(self) -> list:
+        """
+        List all workflow templates in the database.
+
+        Returns:
+            List of tuples containing (name, version, description) for each workflow.
+        """
+        with self.manager.get_template_session() as session:
+            workflows = session.query(Template_Workflows).all()
+            return [
+                (wf.name, wf.version, wf.description or "")
+                for wf in workflows
+            ]
+
     def close(self):
         """Close database connections."""
         self.manager.close()
@@ -450,7 +465,10 @@ def main():
         "-e", "--export", action="store_true", help="Export workflow to YAML"
     )
     parser.add_argument(
-        "-l", "--load", action="store_true", help="Import/Load workflow from YAML"
+        "-i", "--import", dest="import_yaml", action="store_true", help="Import/Load workflow from YAML"
+    )
+    parser.add_argument(
+        "-l", "--list", action="store_true", help="List all workflows in the database"
     )
     parser.add_argument("-f", "--file", help="YAML filename for import/export")
     parser.add_argument(
@@ -465,8 +483,8 @@ def main():
     args = parser.parse_args()
 
     # Validate arguments
-    if not any([args.export, args.load, args.graph]):
-        parser.error("Must specify one of: -e/--export, -l/--load, or --graph")
+    if not any([args.export, args.import_yaml, args.graph, args.list]):
+        parser.error("Must specify one of: -e/--export, -i/--import, -l/--list, or --graph")
 
     if args.export and not args.workflow:
         parser.error("-e/--export requires -w/--workflow")
@@ -474,8 +492,8 @@ def main():
     if args.graph and not args.workflow:
         parser.error("--graph requires -w/--workflow")
 
-    if args.load and not args.file:
-        parser.error("-l/--load requires -f/--file")
+    if args.import_yaml and not args.file:
+        parser.error("-i/--import requires -f/--file")
 
     # Initialize manager
     try:
@@ -485,11 +503,23 @@ def main():
             output_file = manager.export_yaml(args.workflow, args.file)
             print(f"✓ Exported workflow '{args.workflow}' to: {output_file}")
 
-        elif args.load:
+        elif args.import_yaml:
             workflow_name = manager.import_yaml(args.file)
             print(
                 f"✓ Imported workflow '{workflow_name}' from: {os.path.abspath(args.file)}"
             )
+
+        elif args.list:
+            workflows = manager.list_workflows()
+            if workflows:
+                print(f"\n{'Name':<30} {'Version':<10} {'Description'}")
+                print("-" * 80)
+                for name, version, description in workflows:
+                    desc_short = (description[:50] + "...") if len(description) > 50 else description
+                    print(f"{name:<30} {version:<10} {desc_short}")
+                print(f"\nTotal: {len(workflows)} workflow(s)")
+            else:
+                print("No workflows found in database.")
 
         elif args.graph:
             output_file = manager.export_dot(args.workflow, args.file)

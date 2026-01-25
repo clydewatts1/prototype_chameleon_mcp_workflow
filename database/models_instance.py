@@ -127,7 +127,12 @@ class Local_Workflows(InstanceBase):
 
     # Relationships
     instance = relationship("Instance_Context", back_populates="workflows")
-    roles = relationship("Local_Roles", back_populates="workflow", cascade="all, delete-orphan")
+    roles = relationship(
+        "Local_Roles",
+        foreign_keys="Local_Roles.local_workflow_id",
+        back_populates="workflow",
+        cascade="all, delete-orphan"
+    )
     interactions = relationship("Local_Interactions", back_populates="workflow", cascade="all, delete-orphan")
     components = relationship("Local_Components", back_populates="workflow", cascade="all, delete-orphan")
     guardians = relationship("Local_Guardians", back_populates="workflow", cascade="all, delete-orphan")
@@ -191,8 +196,16 @@ class Local_Roles(InstanceBase):
     )
 
     # Relationships
-    workflow = relationship("Local_Workflows", foreign_keys=[local_workflow_id], back_populates="roles")
-    linked_workflow = relationship("Local_Workflows", foreign_keys=[linked_local_workflow_id])
+    workflow = relationship(
+        "Local_Workflows",
+        foreign_keys=[local_workflow_id],
+        back_populates="roles"
+    )
+    linked_workflow = relationship(
+        "Local_Workflows",
+        foreign_keys=[linked_local_workflow_id],
+        post_update=True
+    )
     components = relationship("Local_Components", back_populates="role", cascade="all, delete-orphan")
     assignments = relationship("Local_Actor_Role_Assignments", back_populates="role", cascade="all, delete-orphan")
     role_attributes = relationship("Local_Role_Attributes", back_populates="role", cascade="all, delete-orphan")

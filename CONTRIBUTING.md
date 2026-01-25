@@ -122,6 +122,12 @@ prototype_chameleon_mcp_workflow/
 ├── streamlit_client/             # Web UI
 │   ├── __init__.py              # Client module
 │   └── app.py                   # Streamlit app
+├── database/                     # Database module
+│   ├── README.md                # Database documentation
+│   └── workflow.py              # SQLAlchemy models and DatabaseManager
+├── common/                       # Common utilities
+│   ├── README.md                # Configuration documentation
+│   └── config.py                # Configuration management
 └── tests/                        # Test files
 ```
 
@@ -181,6 +187,8 @@ prototype_chameleon_mcp_workflow/
 - **Workflow Engine**: Add new workflow patterns and execution strategies
 - **MCP Server**: Enhance MCP protocol implementation
 - **Streamlit Client**: Improve UI/UX and add visualizations
+- **Database Module**: Add new models, optimize queries, enhance data management
+- **Common Module**: Add utilities, improve configuration handling
 - **Documentation**: Improve guides and API docs
 - **Tests**: Increase test coverage
 - **Examples**: Add example workflows and use cases

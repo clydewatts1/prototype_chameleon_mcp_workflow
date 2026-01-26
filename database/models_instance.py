@@ -10,13 +10,50 @@ All tables use InstanceBase to ensure complete isolation from template models.
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, Integer, BigInteger, DateTime, Boolean, ForeignKey, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Text, Integer, BigInteger, DateTime, Boolean, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy.types import TypeDecorator, CHAR
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQL_UUID
 from sqlalchemy.orm import declarative_base, relationship
 from .enums import (
     RoleType, DecompositionStrategy, ComponentDirection, GuardianType,
     InstanceStatus, ActorType, AssignmentStatus, UOWStatus
 )
+
+
+# Database-agnostic UUID type (compatible with SQLite, PostgreSQL, MySQL, etc.)
+class UUID(TypeDecorator):
+    """
+    Platform-independent UUID type.
+    Uses PostgreSQL's UUID type when available, otherwise uses CHAR(36) storing as stringified hex values.
+    """
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(PostgreSQL_UUID())
+        else:
+            return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == 'postgresql':
+            return value
+        else:
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            else:
+                return str(uuid.UUID(value))
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            if isinstance(value, uuid.UUID):
+                return value
+            else:
+                return uuid.UUID(value)
 
 # Separate declarative base for Instance tier (Tier 2)
 InstanceBase = declarative_base()
@@ -32,7 +69,7 @@ class Instance_Context(InstanceBase):
     }
 
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="The Global ID for this specific deployment."
@@ -73,24 +110,27 @@ class Local_Workflows(InstanceBase):
     A specific workflow definition active within this instance. Can be a Master or a Child dependency.
     """
     __tablename__ = "local_workflows"
-    __table_args__ = {
-        "comment": "A specific workflow definition active within this instance. Can be a Master or a Child dependency."
-    }
+    __table_args__ = (
+        UniqueConstraint('instance_id', 'name', name='uq_local_workflows_instance_name'),
+        {
+            "comment": "A specific workflow definition active within this instance. Can be a Master or a Child dependency."
+        }
+    )
 
     local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique ID for this workflow within this instance."
     )
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("instance_context.instance_id", ondelete="CASCADE"),
         nullable=False,
         comment="The parent container."
     )
     original_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         nullable=False,
         comment="Traceability link to the source blueprint."
     )
@@ -144,18 +184,21 @@ class Local_Roles(InstanceBase):
     The execution logic nodes. Cloned from Template_Roles.
     """
     __tablename__ = "local_roles"
-    __table_args__ = {
-        "comment": "The execution logic nodes. Cloned from Template_Roles."
-    }
+    __table_args__ = (
+        UniqueConstraint('local_workflow_id', 'name', name='uq_local_roles_workflow_name'),
+        {
+            "comment": "The execution logic nodes. Cloned from Template_Roles."
+        }
+    )
 
     role_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Local unique identifier."
     )
     local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_workflows.local_workflow_id", ondelete="CASCADE"),
         nullable=False,
         comment="Parent local workflow."
@@ -189,7 +232,7 @@ class Local_Roles(InstanceBase):
         comment="Flag if this role spawns a sub-workflow."
     )
     linked_local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_workflows.local_workflow_id", ondelete="SET NULL"),
         nullable=True,
         comment="Points to the Child Workflow hosted in this same instance if recursive."
@@ -218,18 +261,21 @@ class Local_Interactions(InstanceBase):
     The execution holding areas. Cloned from Template_Interactions.
     """
     __tablename__ = "local_interactions"
-    __table_args__ = {
-        "comment": "The execution holding areas. Cloned from Template_Interactions."
-    }
+    __table_args__ = (
+        UniqueConstraint('local_workflow_id', 'name', name='uq_local_interactions_workflow_name'),
+        {
+            "comment": "The execution holding areas. Cloned from Template_Interactions."
+        }
+    )
 
     interaction_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Local unique identifier."
     )
     local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_workflows.local_workflow_id", ondelete="CASCADE"),
         nullable=False,
         comment="Parent local workflow."
@@ -264,30 +310,33 @@ class Local_Components(InstanceBase):
     The execution connections. Cloned from Template_Components.
     """
     __tablename__ = "local_components"
-    __table_args__ = {
-        "comment": "The execution connections. Cloned from Template_Components."
-    }
+    __table_args__ = (
+        UniqueConstraint('local_workflow_id', 'name', name='uq_local_components_workflow_name'),
+        {
+            "comment": "The execution connections. Cloned from Template_Components."
+        }
+    )
 
     component_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Local unique identifier."
     )
     local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_workflows.local_workflow_id", ondelete="CASCADE"),
         nullable=False,
         comment="Parent local workflow."
     )
     interaction_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_interactions.interaction_id", ondelete="CASCADE"),
         nullable=False,
         comment="Connection Endpoint A."
     )
     role_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_roles.role_id", ondelete="CASCADE"),
         nullable=False,
         comment="Connection Endpoint B."
@@ -323,24 +372,27 @@ class Local_Guardians(InstanceBase):
     The active security gates. Cloned from Template_Guardians.
     """
     __tablename__ = "local_guardians"
-    __table_args__ = {
-        "comment": "The active security gates. Cloned from Template_Guardians."
-    }
+    __table_args__ = (
+        UniqueConstraint('local_workflow_id', 'name', name='uq_local_guardians_workflow_name'),
+        {
+            "comment": "The active security gates. Cloned from Template_Guardians."
+        }
+    )
 
     guardian_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Local unique identifier."
     )
     local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_workflows.local_workflow_id", ondelete="CASCADE"),
         nullable=False,
         comment="Parent local workflow."
     )
     component_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_components.component_id", ondelete="CASCADE"),
         nullable=False,
         comment="The pipe being guarded."
@@ -378,18 +430,21 @@ class Local_Actors(InstanceBase):
     Identities authorized to operate within this specific Instance Context.
     """
     __tablename__ = "local_actors"
-    __table_args__ = {
-        "comment": "Identities authorized to operate within this specific Instance Context."
-    }
+    __table_args__ = (
+        UniqueConstraint('instance_id', 'name', name='uq_local_actors_instance_name'),
+        {
+            "comment": "Identities authorized to operate within this specific Instance Context."
+        }
+    )
 
     actor_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique ID for the actor in this instance."
     )
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("instance_context.instance_id", ondelete="CASCADE"),
         nullable=False,
         comment="The container."
@@ -440,19 +495,19 @@ class Local_Actor_Role_Assignments(InstanceBase):
     }
 
     assignment_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique identifier."
     )
     actor_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_actors.actor_id", ondelete="CASCADE"),
         nullable=False,
         comment="The Actor."
     )
     role_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_roles.role_id", ondelete="CASCADE"),
         nullable=False,
         comment="The Role they are allowed to assume."
@@ -479,25 +534,25 @@ class Local_Role_Attributes(InstanceBase):
     }
 
     memory_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique identifier."
     )
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("instance_context.instance_id", ondelete="CASCADE"),
         nullable=False,
         comment="The container."
     )
     role_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_roles.role_id", ondelete="CASCADE"),
         nullable=False,
         comment="The Role context this memory applies to."
     )
     actor_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_actors.actor_id", ondelete="SET NULL"),
         nullable=True,
         comment="If NULL: Global Blueprint (Shared knowledge). If SET: Personal Playbook (Private knowledge)."
@@ -538,31 +593,31 @@ class UnitsOfWork(InstanceBase):
     }
 
     uow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique identifier."
     )
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("instance_context.instance_id", ondelete="CASCADE"),
         nullable=False,
         comment="The container."
     )
     local_workflow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_workflows.local_workflow_id", ondelete="CASCADE"),
         nullable=False,
         comment="Identifies which specific process this token is traversing."
     )
     parent_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("units_of_work.uow_id", ondelete="SET NULL"),
         nullable=True,
         comment="Link to the Base UOW if this is a Child."
     )
     current_interaction_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_interactions.interaction_id", ondelete="CASCADE"),
         nullable=False,
         comment="Physical location of the token."
@@ -605,19 +660,19 @@ class UOW_Attributes(InstanceBase):
     }
 
     attribute_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         primary_key=True,
         default=uuid.uuid4,
         comment="Unique identifier."
     )
     uow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("units_of_work.uow_id", ondelete="CASCADE"),
         nullable=False,
         comment="The parent token."
     )
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("instance_context.instance_id", ondelete="CASCADE"),
         nullable=False,
         comment="The container."
@@ -638,7 +693,7 @@ class UOW_Attributes(InstanceBase):
         comment="Version number (increments on updates)."
     )
     actor_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_actors.actor_id", ondelete="CASCADE"),
         nullable=False,
         comment="Who made this change."
@@ -670,31 +725,31 @@ class Interaction_Logs(InstanceBase):
         comment="Sequence number."
     )
     instance_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("instance_context.instance_id", ondelete="CASCADE"),
         nullable=False,
         comment="The container."
     )
     uow_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("units_of_work.uow_id", ondelete="CASCADE"),
         nullable=False,
         comment="The token moved."
     )
     actor_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_actors.actor_id", ondelete="CASCADE"),
         nullable=False,
         comment="The actor responsible."
     )
     role_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_roles.role_id", ondelete="CASCADE"),
         nullable=False,
         comment="The active role context."
     )
     interaction_id = Column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("local_interactions.interaction_id", ondelete="CASCADE"),
         nullable=False,
         comment="The location involved."

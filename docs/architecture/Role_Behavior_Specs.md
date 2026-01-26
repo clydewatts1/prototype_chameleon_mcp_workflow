@@ -107,7 +107,7 @@ This document provides detailed implementation specifications for each role in t
 
 **Input Data:**
 - Stale UOW set from "Chronos" interaction (for Queue Timeout)
-- Active UOW records with PROCESSING status (for Zombie detection)
+- Active UOW records with ACTIVE status (for Zombie detection)
 - Original timestamp and timeout thresholds
 - Escalation policy configuration
 - Current workflow state

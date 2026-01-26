@@ -640,6 +640,11 @@ class UnitsOfWork(InstanceBase):
         nullable=False,
         comment="Total children completed (Optimization for Cerberus)."
     )
+    last_heartbeat = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of last active signal from Actor. Used by Tau for Zombie detection."
+    )
 
     # Relationships
     instance = relationship("Instance_Context", back_populates="units_of_work")

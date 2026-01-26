@@ -103,7 +103,7 @@ This document provides detailed implementation specifications for each role in t
 
 **Trigger Conditions:**
 1. **Stale Token Monitor**: A UOW remains in an Interaction beyond the STALE_TOKEN_LIMIT threshold (Queue Timeout).
-2. **Zombie Actor Monitor**: A UOW with status `PROCESSING` has `last_heartbeat` timestamp exceeding the EXECUTION_TIMEOUT threshold (Execution Timeout).
+2. **Zombie Actor Monitor**: A UOW with status `ACTIVE` has `last_heartbeat` timestamp exceeding the EXECUTION_TIMEOUT threshold (Execution Timeout).
 
 **Input Data:**
 - Stale UOW set from "Chronos" interaction (for Queue Timeout)
@@ -134,7 +134,7 @@ This document provides detailed implementation specifications for each role in t
 
 ### **Duty 2: Zombie Actor Monitor (Execution Timeout)**
 1. Periodically sweep UnitsOfWork table for records with:
-   - Status = `PROCESSING`
+   - Status = `ACTIVE`
    - `last_heartbeat` NULL or exceeds EXECUTION_TIMEOUT threshold (e.g., 5 minutes)
 2. Identify Zombie Actor scenarios:
    - Actor crashed or terminated unexpectedly
@@ -143,17 +143,17 @@ This document provides detailed implementation specifications for each role in t
 3. Execute reclamation strategy:
    - Log Zombie Actor detection event with Actor ID and UOW context
    - Force UOW status transition based on policy:
-     * **ERROR**: For immediate escalation to Epsilon Role for remediation
-     * **RETRY**: For automatic re-queuing if failure is transient
+     * **FAILED**: For immediate escalation to Epsilon Role for remediation
+     * **PENDING**: For automatic re-queuing if failure is transient
 4. Release Actor assignment (if applicable) to free resource
 5. Route reclaimed UOW to appropriate next destination:
-   - ERROR → Epsilon Role for remediation
-   - RETRY → Return to original Interaction queue
+   - FAILED → Epsilon Role for remediation
+   - PENDING → Return to original Interaction queue
 6. Update monitoring metrics for Actor reliability tracking
 
 **Terminal State:**
 - **Stale Token Path**: Stale UOW set processed with forced-end status; routed to Epsilon or Cerberus depending on recoverability.
-- **Zombie Actor Path**: Zombie UOW reclaimed and transitioned to ERROR or RETRY; Actor assignment released.
+- **Zombie Actor Path**: Zombie UOW reclaimed and transitioned to FAILED or PENDING; Actor assignment released.
 
 ---
 

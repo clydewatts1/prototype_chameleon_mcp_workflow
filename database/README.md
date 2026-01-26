@@ -211,8 +211,8 @@ python tests/example_usage.py
 
 ## References
 
-- **DATABASE_SCHEMA_SPEC.md**: Complete schema specification
-- **WORKFLOW_CONSTITUTION.md**: Business logic and relationships
-- **Constitution Article V**: Role type definitions
-- **Constitution Article III**: Memory hierarchy
-- **Constitution Article XIII**: Recursive workflow rules
+- [**Database Schema Specification**](../docs/architecture/Database_Schema_Specification.md): Complete schema specification
+- [**Workflow Constitution**](../docs/architecture/Workflow_Constitution.md): Business logic and relationships
+- [**Constitution Article V**](../docs/architecture/Workflow_Constitution.md#article-v-the-functional-role-types--decomposition): Role type definitions
+- [**Constitution Article III**](../docs/architecture/Workflow_Constitution.md#article-iii-the-memory-hierarchy): Memory hierarchy
+- [**Constitution Article XIII**](../docs/architecture/Workflow_Constitution.md#article-xiii-recursive-workflows-nesting): Recursive workflow rules

@@ -42,6 +42,10 @@ from database.enums import (
     ComponentDirection,
 )
 
+# Well-known system actor ID for automated operations
+# This ensures consistent identity across all system-initiated operations
+SYSTEM_ACTOR_ID = uuid.UUID('00000000-0000-0000-0000-000000000001')
+
 
 class ChameleonEngine:
     """
@@ -155,10 +159,21 @@ class ChameleonEngine:
                             role_type=template_role.role_type,
                             decomposition_strategy=template_role.strategy,  # Template uses 'strategy', Instance uses 'decomposition_strategy'
                             is_recursive_gateway=template_role.child_workflow_id is not None,  # Derive from child_workflow_id presence
-                            linked_local_workflow_id=None  # TODO: Handle recursive workflows
+                            linked_local_workflow_id=None  # KNOWN LIMITATION: Recursive workflows not yet implemented
                         )
                         instance_session.add(local_role)
                         role_mapping[template_role.role_id] = local_role_id
+                        
+                        # KNOWN LIMITATION: If template_role.child_workflow_id is set, this indicates
+                        # a recursive gateway, but we don't currently clone and link the child workflow.
+                        # This would require recursive instantiation logic to be added.
+                        if template_role.child_workflow_id:
+                            # TODO: Implement recursive workflow instantiation
+                            # This should:
+                            # 1. Recursively instantiate the child workflow
+                            # 2. Set linked_local_workflow_id to the child's local_workflow_id
+                            # 3. Handle Hermes (entry) and Iris (exit) interactions
+                            pass
                         
                         # Track the Alpha role for later
                         if template_role.role_type == RoleType.ALPHA.value:
@@ -274,7 +289,6 @@ class ChameleonEngine:
                     
                     # Step 9: Create initial UOW attributes from initial_context
                     # Store each key-value pair from initial_context as a separate attribute
-                    system_actor_id = uuid.uuid4()  # TODO: Should use a proper SYSTEM actor
                     for key, value in initial_context.items():
                         uow_attr = UOW_Attributes(
                             attribute_id=uuid.uuid4(),
@@ -283,7 +297,7 @@ class ChameleonEngine:
                             key=key,
                             value=value,
                             version=1,
-                            actor_id=system_actor_id,
+                            actor_id=SYSTEM_ACTOR_ID,  # Use well-known system actor ID
                             reasoning="Initial workflow context"
                         )
                         instance_session.add(uow_attr)
@@ -310,14 +324,19 @@ class ChameleonEngine:
         Implements Interface & MCP Specs Section 1.1: Tool checkout_work
         Enforces UOW Lifecycle Specs Section 2.2: Valid Transition Matrix (PENDING → IN_PROGRESS)
         
+        LOCKING MECHANISM NOTE:
+        The current implementation uses status (PENDING → ACTIVE) and last_heartbeat timestamp
+        as the locking mechanism. The schema does not currently have dedicated locked_by/locked_at
+        fields. In production, these fields should be added to provide explicit lock ownership
+        tracking and enable better debugging and lock timeout handling.
+        
         Process:
         1. Query Instance_Interactions to find PENDING UOWs for this role_id
         2. Join with Instance_Components and Instance_Guardians to verify path exists
         3. Execute Transactional Lock:
            - Select a candidate UOW
            - Update status to IN_PROGRESS (ACTIVE in current enum)
-           - Set locked_by = actor_id
-           - Set locked_at = NOW
+           - Set last_heartbeat = NOW (as lock timestamp)
         4. Return the uow_id and its attributes
         
         Args:
@@ -431,17 +450,23 @@ class ChameleonEngine:
         Enforces UOW Lifecycle Specs Section 3: Atomic Versioning (The Data Physics)
         Enforces Article XVII: Historical Lineage and Attribution
         
+        LOCK VERIFICATION NOTE:
+        Lock ownership is verified via status check (must be ACTIVE). Full lock verification
+        would check a dedicated locked_by field against actor_id, but the current schema
+        doesn't have this field. For production use, locked_by/locked_at fields should be
+        added to the UnitsOfWork table.
+        
         Process:
-        1. Verify that uow_id is locked by actor_id (Security Check)
+        1. Verify that uow_id is locked by actor_id (Security Check via status)
         2. Implement Atomic Versioning (Spec 3.2):
            - Calculate diff between old attributes and result_attributes
            - Insert records into UOW_Attributes (versioned history)
         3. Update Status to COMPLETED
-        4. Release the lock (locked_by = NULL)
+        4. Release the lock (clear last_heartbeat)
         
         Args:
             uow_id: The token being processed
-            actor_id: The Actor's identity (must match lock holder)
+            actor_id: The Actor's identity (should match lock holder)
             result_attributes: JSON blob of new or modified data
             reasoning: Optional text explanation for the decision (for Traceability)
             

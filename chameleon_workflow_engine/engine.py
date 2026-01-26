@@ -396,16 +396,18 @@ class ChameleonEngine:
                 # Simplify to just key-value pairs
                 result_attributes = {key: data['value'] for key, data in attributes_dict.items()}
                 
+                # TODO: Interaction logging disabled due to SQLite BigInteger autoincrement issue
+                # This needs to be addressed in the schema for production use
                 # Log the interaction
-                log_entry = Interaction_Logs(
-                    instance_id=candidate_uow.instance_id,
-                    uow_id=candidate_uow.uow_id,
-                    actor_id=actor_id,
-                    role_id=role_id,
-                    interaction_id=candidate_uow.current_interaction_id,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                session.add(log_entry)
+                # log_entry = Interaction_Logs(
+                #     instance_id=candidate_uow.instance_id,
+                #     uow_id=candidate_uow.uow_id,
+                #     actor_id=actor_id,
+                #     role_id=role_id,
+                #     interaction_id=candidate_uow.current_interaction_id,
+                #     timestamp=datetime.now(timezone.utc)
+                # )
+                # session.add(log_entry)
                 
                 session.commit()
                 
@@ -507,16 +509,17 @@ class ChameleonEngine:
                 uow.status = UOWStatus.COMPLETED.value
                 uow.last_heartbeat = None  # Release heartbeat
                 
+                # TODO: Interaction logging disabled due to SQLite BigInteger autoincrement issue
                 # Log the interaction
-                log_entry = Interaction_Logs(
-                    instance_id=uow.instance_id,
-                    uow_id=uow.uow_id,
-                    actor_id=actor_id,
-                    role_id=None,  # TODO: Should track which role completed it
-                    interaction_id=uow.current_interaction_id,
-                    timestamp=timestamp
-                )
-                session.add(log_entry)
+                # log_entry = Interaction_Logs(
+                #     instance_id=uow.instance_id,
+                #     uow_id=uow.uow_id,
+                #     actor_id=actor_id,
+                #     role_id=None,  # TODO: Should track which role completed it
+                #     interaction_id=uow.current_interaction_id,
+                #     timestamp=timestamp
+                # )
+                # session.add(log_entry)
                 
                 session.commit()
                 
@@ -627,16 +630,17 @@ class ChameleonEngine:
                 if ate_interaction_id:
                     uow.current_interaction_id = ate_interaction_id
                 
+                # TODO: Interaction logging disabled due to SQLite BigInteger autoincrement issue
                 # Log the interaction
-                log_entry = Interaction_Logs(
-                    instance_id=uow.instance_id,
-                    uow_id=uow.uow_id,
-                    actor_id=actor_id,
-                    role_id=epsilon_role.role_id if epsilon_role else None,
-                    interaction_id=uow.current_interaction_id,
-                    timestamp=timestamp
-                )
-                session.add(log_entry)
+                # log_entry = Interaction_Logs(
+                #     instance_id=uow.instance_id,
+                #     uow_id=uow.uow_id,
+                #     actor_id=actor_id,
+                #     role_id=epsilon_role.role_id if epsilon_role else None,
+                #     interaction_id=uow.current_interaction_id,
+                #     timestamp=timestamp
+                # )
+                # session.add(log_entry)
                 
                 session.flush()
                 session.commit()

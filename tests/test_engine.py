@@ -31,6 +31,8 @@ from database import (
     Instance_Context,
     Local_Workflows,
     Local_Roles,
+    Local_Interactions,
+    Local_Components,
     Local_Actors,
     UnitsOfWork,
     UOW_Attributes,
@@ -517,7 +519,6 @@ def test_report_failure():
             
             if epsilon_role:
                 # Check if UOW is in an interaction that feeds Epsilon
-                from sqlalchemy import and_
                 epsilon_component = session.query(Local_Components).filter(
                     and_(
                         Local_Components.role_id == epsilon_role.role_id,

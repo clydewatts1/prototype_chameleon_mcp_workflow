@@ -339,8 +339,6 @@ class WorkflowManager:
             ValueError: If any validation rule is violated, with a descriptive
                        message citing the specific Constitutional article.
         """
-        from sqlalchemy import func
-        
         # Query all roles for this workflow
         roles = (
             session.query(Template_Roles)

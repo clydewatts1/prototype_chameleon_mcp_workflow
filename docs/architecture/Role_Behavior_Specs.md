@@ -99,17 +99,23 @@ This document provides detailed implementation specifications for each role in t
 
 ## **4. Tau Role (The Chronometer)**
 
-**Purpose:** The Timeout Role responsible for managing stale or expired tokens that exceed time limits.
+**Purpose:** The Timeout Role responsible for managing stale or expired tokens that exceed time limits, and for detecting and reclaiming work from failed or unresponsive Actors (Zombie Actors).
 
-**Trigger Condition:** A UOW remains in an Interaction beyond the STALE_TOKEN_LIMIT threshold.
+**Trigger Conditions:**
+1. **Stale Token Monitor**: A UOW remains in an Interaction beyond the STALE_TOKEN_LIMIT threshold (Queue Timeout).
+2. **Zombie Actor Monitor**: A UOW with status `PROCESSING` has `last_heartbeat` timestamp exceeding the EXECUTION_TIMEOUT threshold (Execution Timeout).
 
 **Input Data:**
-- Stale UOW set from "Chronos" interaction
-- Original timestamp and timeout threshold
+- Stale UOW set from "Chronos" interaction (for Queue Timeout)
+- Active UOW records with PROCESSING status (for Zombie detection)
+- Original timestamp and timeout thresholds
 - Escalation policy configuration
 - Current workflow state
+- Actor heartbeat thresholds
 
 **Execution Logic:**
+
+### **Duty 1: Stale Token Monitor (Queue Timeout)**
 1. Receive stale UOW set from "Chronos" interaction holding area
 2. Evaluate staleness severity (how long past threshold)
 3. Load timeout handling policy from Role configuration
@@ -126,7 +132,28 @@ This document provides detailed implementation specifications for each role in t
 7. Update Global Blueprint with timeout patterns for future prevention
 8. Serve as Safety Valve for infinite loops (enforce termination conditions)
 
-**Terminal State:** Stale UOW set processed with forced-end status; routed to Epsilon or Cerberus depending on recoverability.
+### **Duty 2: Zombie Actor Monitor (Execution Timeout)**
+1. Periodically sweep UnitsOfWork table for records with:
+   - Status = `PROCESSING`
+   - `last_heartbeat` NULL or exceeds EXECUTION_TIMEOUT threshold (e.g., 5 minutes)
+2. Identify Zombie Actor scenarios:
+   - Actor crashed or terminated unexpectedly
+   - Network disruption preventing heartbeat updates
+   - System-level failures
+3. Execute reclamation strategy:
+   - Log Zombie Actor detection event with Actor ID and UOW context
+   - Force UOW status transition based on policy:
+     * **ERROR**: For immediate escalation to Epsilon Role for remediation
+     * **RETRY**: For automatic re-queuing if failure is transient
+4. Release Actor assignment (if applicable) to free resource
+5. Route reclaimed UOW to appropriate next destination:
+   - ERROR → Epsilon Role for remediation
+   - RETRY → Return to original Interaction queue
+6. Update monitoring metrics for Actor reliability tracking
+
+**Terminal State:**
+- **Stale Token Path**: Stale UOW set processed with forced-end status; routed to Epsilon or Cerberus depending on recoverability.
+- **Zombie Actor Path**: Zombie UOW reclaimed and transitioned to ERROR or RETRY; Actor assignment released.
 
 ---
 

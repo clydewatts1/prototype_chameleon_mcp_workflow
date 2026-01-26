@@ -201,14 +201,15 @@ def test_tier2_schema_creation():
         assert 'is_toxic' in memory_columns, "is_toxic not found in local_role_attributes"
         print("✓ Local_Role_Attributes has required columns for Memory Hierarchy")
         
-        # UnitsOfWork columns (verify child tracking fields)
+        # UnitsOfWork columns (verify child tracking fields and zombie detection)
         uow_columns = [col['name'] for col in inspector.get_columns('units_of_work')]
         assert 'uow_id' in uow_columns, "uow_id not found in units_of_work"
         assert 'instance_id' in uow_columns, "instance_id not found in units_of_work"
         assert 'parent_id' in uow_columns, "parent_id not found in units_of_work"
         assert 'child_count' in uow_columns, "child_count not found in units_of_work"
         assert 'finished_child_count' in uow_columns, "finished_child_count not found in units_of_work"
-        print("✓ UnitsOfWork has required columns including child tracking")
+        assert 'last_heartbeat' in uow_columns, "last_heartbeat not found in units_of_work"
+        print("✓ UnitsOfWork has required columns including child tracking and zombie detection")
         
         manager.close()
         print("\n✓ Tier 2 Schema Creation: SUCCESS")

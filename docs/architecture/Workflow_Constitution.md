@@ -92,6 +92,18 @@ The **Cerberus Guard** prevents "Zombie Parents" from reaching Omega by enforcin
 * **Transit**: ![][image9].  
 * **Resolution**: The ![][image4] Role manages "forced-end" transitions, typically escalating to the ![][image3] **Role** before routing the set to the **Interaction (Cerberus)**.
 
+### **3\. The Zombie Actor Protocol**
+
+The Zombie Actor Protocol ensures that Units of Work do not remain indefinitely in an ACTIVE state due to Actor failure, system crashes, or network disruptions. The ![][image4] (Tau) Role monitors execution health and reclaims stalled work.
+
+* **Passive Heartbeat**: Actors processing a UOW must periodically update the `last_heartbeat` timestamp in the UnitsOfWork table. This signals active execution.
+* **Active Sweep**: The ![][image4] Role continuously monitors for UOWs with status `ACTIVE` where `last_heartbeat` exceeds a configurable threshold (e.g., 5 minutes).
+* **Reclamation**: When a Zombie Actor is detected, ![][image4] forces the affected UOW to either:
+  * **FAILED** status: For immediate escalation to the ![][image3] (Epsilon) Role for remediation.
+  * **PENDING** status: For automatic re-queuing if the failure is transient (e.g., network timeout).
+
+This protocol protects the workflow from "silent" Actor failures and ensures all work is either completed, remediated, or explicitly terminated.
+
 ## **ARTICLE XIII: Recursive Workflows (Nesting)**
 
 A Role may be defined as a **Recursive Gateway**, where a Parent Workflow Role delegates execution to an independent Child Workflow.

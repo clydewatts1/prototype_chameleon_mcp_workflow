@@ -243,49 +243,47 @@ def inspect_roles(session: Session, instance_id: str):
     clear_screen()
     print_header("👥 Inspect Roles")
 
-    # Query: Get all Local_Roles and count their inbound work
+    # Query: Get all Local_Roles and count their inbound work using a single query
     # Join path: Local_Roles -> Local_Components (INBOUND) -> Local_Interactions -> UnitsOfWork
+    # Using LEFT OUTER JOIN and GROUP BY to handle roles with zero work count
 
-    # First, get all roles for this instance
-    roles_query = (
-        session.query(Local_Roles)
+    roles_with_counts = (
+        session.query(
+            Local_Roles.name,
+            Local_Roles.role_type,
+            Local_Roles.role_id,
+            func.count(UnitsOfWork.uow_id).label("work_count"),
+        )
         .join(Local_Workflows, Local_Roles.local_workflow_id == Local_Workflows.local_workflow_id)
+        .outerjoin(
+            Local_Components,
+            (Local_Components.role_id == Local_Roles.role_id)
+            & (Local_Components.direction == ComponentDirection.INBOUND.value),
+        )
+        .outerjoin(
+            Local_Interactions,
+            Local_Components.interaction_id == Local_Interactions.interaction_id,
+        )
+        .outerjoin(
+            UnitsOfWork,
+            (UnitsOfWork.current_interaction_id == Local_Interactions.interaction_id)
+            & (UnitsOfWork.instance_id == instance_id)
+            & (UnitsOfWork.status == UOWStatus.PENDING.value),
+        )
         .filter(Local_Workflows.instance_id == instance_id)
+        .group_by(Local_Roles.role_id, Local_Roles.name, Local_Roles.role_type)
         .all()
     )
 
-    if not roles_query:
+    if not roles_with_counts:
         print("No roles found for this instance.")
         return
 
-    # For each role, calculate work count
-    role_data = []
-    for role in roles_query:
-        # Count UOWs waiting for this role by:
-        # 1. Find inbound components for this role
-        # 2. Get their interactions
-        # 3. Count UOWs at those interactions
-
-        work_count = (
-            session.query(func.count(UnitsOfWork.uow_id))
-            .join(
-                Local_Interactions,
-                UnitsOfWork.current_interaction_id == Local_Interactions.interaction_id,
-            )
-            .join(
-                Local_Components,
-                Local_Interactions.interaction_id == Local_Components.interaction_id,
-            )
-            .filter(
-                Local_Components.role_id == role.role_id,
-                Local_Components.direction == ComponentDirection.INBOUND.value,
-                UnitsOfWork.instance_id == instance_id,
-                UnitsOfWork.status == UOWStatus.PENDING.value,
-            )
-            .scalar()
-        ) or 0
-
-        role_data.append([role.name, role.role_type, str(role.role_id)[:8] + "...", work_count])
+    # Prepare data for display
+    role_data = [
+        [role.name, role.role_type, str(role.role_id)[:8] + "...", role.work_count]
+        for role in roles_with_counts
+    ]
 
     # Sort by work count descending
     role_data.sort(key=lambda x: x[3], reverse=True)
@@ -380,9 +378,13 @@ def main():
         # Ensure the schema exists
         try:
             db_manager.create_instance_schema()
-        except Exception:
-            # Schema already exists, that's fine
-            pass
+        except Exception as schema_error:
+            # Schema likely already exists, log and continue
+            # In production, you might want to check for specific exceptions like
+            # sqlalchemy.exc.OperationalError for table already exists
+            import logging
+
+            logging.debug(f"Schema creation skipped: {schema_error}")
     except Exception as e:
         print(f"❌ Failed to connect to database: {e}")
         print(f"Connection string: {args.db_url}")

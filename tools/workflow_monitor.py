@@ -25,11 +25,11 @@ Source of Truth:
 """
 
 import sys
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from datetime import datetime, timezone, timedelta
 import argparse
+import re
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -140,7 +140,7 @@ def get_uow_metrics(
             metrics["failed"] = count
 
     # Detect zombies: ACTIVE UOWs with stale heartbeat (>5 minutes)
-    zombie_threshold = datetime.utcnow() - timedelta(minutes=5)
+    zombie_threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
     zombies = (
         session.query(func.count(UnitsOfWork.uow_id))
         .filter(
@@ -182,7 +182,7 @@ def get_active_work(session: Session, instance_id: str) -> List[Dict]:
     )
 
     result = []
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for uow in active_uows:
         duration = None
         if uow.last_heartbeat:
@@ -273,12 +273,19 @@ def get_recent_history(
     ]
 
 
+def sanitize_node_id(name: str) -> str:
+    """Sanitize a name for use as a Graphviz node ID."""
+    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
+
 def get_role_uow_counts(
     session: Session, instance_id: str, workflow_id: str
 ) -> Dict[str, Dict[str, int]]:
     """Get UOW counts per role, categorized by status."""
-    # Query active (locked) UOWs per role via interaction logs
-    # A role has "locked" UOWs if there are active logs showing it's processing
+    # Note: This is a simplified implementation
+    # In a production system, you might track role locks more explicitly
+    # For now, we return empty counts as role-level tracking requires
+    # additional state management in the database
     role_data = {}
 
     # Get all roles for the workflow
@@ -289,8 +296,7 @@ def get_role_uow_counts(
     )
 
     for role in roles:
-        # Count active UOWs that have this role in their latest interaction log
-        # This is a simplified approach - in production, you might track role locks more explicitly
+        # Initialize counts (all zeros for now)
         role_data[role.name] = {
             "active": 0,
             "pending": 0,
@@ -391,7 +397,7 @@ def generate_workflow_graph(
         if role.name in role_counts and role_counts[role.name]["active"] > 0:
             fillcolor = "lightblue"
 
-        node_id = f"role_{role.name.replace(' ', '_')}"
+        node_id = f"role_{sanitize_node_id(role.name)}"
         dot.node(
             node_id,
             label=role.name,
@@ -417,7 +423,7 @@ def generate_workflow_graph(
             fillcolor = "lightyellow"
             label = f"{interaction.name}\\n(Pending: {counts['pending']})"
 
-        node_id = f"interaction_{interaction.name.replace(' ', '_')}"
+        node_id = f"interaction_{sanitize_node_id(interaction.name)}"
         dot.node(
             node_id,
             label=label,
@@ -428,8 +434,8 @@ def generate_workflow_graph(
 
     # Add components as edges
     for component in workflow.components:
-        role_id = f"role_{component.role.name.replace(' ', '_')}"
-        interaction_id = f"interaction_{component.interaction.name.replace(' ', '_')}"
+        role_id = f"role_{sanitize_node_id(component.role.name)}"
+        interaction_id = f"interaction_{sanitize_node_id(component.interaction.name)}"
 
         if component.direction == ComponentDirection.OUTBOUND.value:
             # Role -> Interaction

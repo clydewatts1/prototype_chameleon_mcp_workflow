@@ -50,6 +50,26 @@ def check_project_structure() -> bool:
     return all_present
 
 
+def check_documentation_files() -> bool:
+    """Check if required documentation files exist"""
+    import os
+    
+    required_docs = [
+        "docs/architecture/Workflow_Constitution.md",
+        "docs/architecture/Database_Schema_Specification.md",
+    ]
+    
+    all_present = True
+    for doc_path in required_docs:
+        if os.path.isfile(doc_path):
+            print(f"✓ {doc_path} exists")
+        else:
+            print(f"✗ {doc_path} missing")
+            all_present = False
+    
+    return all_present
+
+
 def test_workflow_engine() -> bool:
     """Test if the workflow engine API works"""
     try:
@@ -118,6 +138,11 @@ def main():
     structure_ok = check_project_structure()
     print()
     
+    # Check documentation files
+    print("Checking documentation files...")
+    docs_ok = check_documentation_files()
+    print()
+    
     # Check project modules
     print("Checking project modules...")
     project_modules = [
@@ -141,7 +166,7 @@ def main():
     
     # Summary
     print("=" * 60)
-    if all_deps_ok and structure_ok and modules_ok and engine_ok:
+    if all_deps_ok and structure_ok and docs_ok and modules_ok and engine_ok:
         print("✅ All checks passed! Your environment is ready.")
         print()
         print("Next steps:")

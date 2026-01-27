@@ -317,8 +317,224 @@ class WorkflowManager:
                             f"Warning: Child workflow '{child_workflow_name}' not found for role '{role_data['name']}'"
                         )
 
+            # Validate workflow topology before committing
+            session.flush()  # Ensure all entities are available for validation
+            self._validate_workflow_topology(session, new_workflow.workflow_id)
+
             # Session will commit on successful context exit
             return workflow_name
+
+    def _validate_workflow_topology(self, session, workflow_id) -> None:
+        """
+        Validate workflow topology against Constitutional rules.
+        
+        This method enforces all structural requirements defined in the
+        Workflow Constitution (docs/architecture/Workflow_Constitution.md).
+        
+        Args:
+            session: Active database session with pending workflow entities.
+            workflow_id: UUID of the workflow to validate.
+            
+        Raises:
+            ValueError: If any validation rule is violated, with a descriptive
+                       message citing the specific Constitutional article.
+        """
+        # Query all roles for this workflow
+        roles = (
+            session.query(Template_Roles)
+            .filter(Template_Roles.workflow_id == workflow_id)
+            .all()
+        )
+        
+        # Build role type mapping
+        roles_by_type = {}
+        for role in roles:
+            if role.role_type not in roles_by_type:
+                roles_by_type[role.role_type] = []
+            roles_by_type[role.role_type].append(role)
+        
+        # R1: Workflow must have exactly one ALPHA role
+        alpha_count = len(roles_by_type.get("ALPHA", []))
+        if alpha_count != 1:
+            raise ValueError(
+                f"Violation of Article V: Workflow must have exactly one ALPHA role "
+                f"(The Origin). Found: {alpha_count}"
+            )
+        
+        # R2: Workflow must have exactly one OMEGA role
+        omega_count = len(roles_by_type.get("OMEGA", []))
+        if omega_count != 1:
+            raise ValueError(
+                f"Violation of Article V: Workflow must have exactly one OMEGA role "
+                f"(The Terminal). Found: {omega_count}"
+            )
+        
+        # R3: Workflow must have exactly one EPSILON role
+        epsilon_count = len(roles_by_type.get("EPSILON", []))
+        if epsilon_count != 1:
+            raise ValueError(
+                f"Violation of Article V & XI.1: Workflow must have exactly one EPSILON role "
+                f"(The Physician) for error remediation. Found: {epsilon_count}"
+            )
+        
+        # R4: Workflow must have exactly one TAU role
+        tau_count = len(roles_by_type.get("TAU", []))
+        if tau_count != 1:
+            raise ValueError(
+                f"Violation of Article V & XI.2: Workflow must have exactly one TAU role "
+                f"(The Chronometer) for timeout management. Found: {tau_count}"
+            )
+        
+        # R5: All BETA roles must have valid strategy
+        beta_roles = roles_by_type.get("BETA", [])
+        for beta_role in beta_roles:
+            if not beta_role.strategy:
+                raise ValueError(
+                    f"Violation of Article V.2: BETA role '{beta_role.name}' must have a "
+                    f"valid strategy (HOMOGENEOUS or HETEROGENEOUS). Found: None"
+                )
+            if beta_role.strategy not in ("HOMOGENEOUS", "HETEROGENEOUS"):
+                raise ValueError(
+                    f"Violation of Article V.2: BETA role '{beta_role.name}' must have a "
+                    f"valid strategy (HOMOGENEOUS or HETEROGENEOUS). Found: {beta_role.strategy}"
+                )
+        
+        # Query all components for this workflow
+        components = (
+            session.query(Template_Components)
+            .filter(Template_Components.workflow_id == workflow_id)
+            .all()
+        )
+        
+        # R6: All components must have valid directionality
+        for component in components:
+            if component.direction not in ("INBOUND", "OUTBOUND"):
+                raise ValueError(
+                    f"Violation of Article IV: Component '{component.name}' must have valid "
+                    f"direction (INBOUND or OUTBOUND). Found: {component.direction}"
+                )
+        
+        # Build component indices for efficient lookups
+        components_by_interaction = {}
+        components_by_role = {}
+        for component in components:
+            # Index by interaction
+            if component.interaction_id not in components_by_interaction:
+                components_by_interaction[component.interaction_id] = {
+                    "INBOUND": [],
+                    "OUTBOUND": []
+                }
+            components_by_interaction[component.interaction_id][component.direction].append(component)
+            
+            # Index by role
+            if component.role_id not in components_by_role:
+                components_by_role[component.role_id] = {
+                    "INBOUND": [],
+                    "OUTBOUND": []
+                }
+            components_by_role[component.role_id][component.direction].append(component)
+        
+        # R7: Interaction flow integrity - all interactions must have producers and consumers
+        interactions = (
+            session.query(Template_Interactions)
+            .filter(Template_Interactions.workflow_id == workflow_id)
+            .all()
+        )
+        
+        for interaction in interactions:
+            interaction_components = components_by_interaction.get(
+                interaction.interaction_id,
+                {"INBOUND": [], "OUTBOUND": []}
+            )
+            producer_count = len(interaction_components["OUTBOUND"])
+            consumer_count = len(interaction_components["INBOUND"])
+            
+            if producer_count < 1 or consumer_count < 1:
+                raise ValueError(
+                    f"Violation of Article IV: Interaction '{interaction.name}' must have at least "
+                    f"one producer (OUTBOUND) and one consumer (INBOUND). "
+                    f"Found: {producer_count} producer(s), {consumer_count} consumer(s)"
+                )
+        
+        # Query all guardians for this workflow
+        guardians = (
+            session.query(Template_Guardians)
+            .filter(Template_Guardians.workflow_id == workflow_id)
+            .all()
+        )
+        
+        # Build guardian index by component_id
+        guardians_by_component = {}
+        for guardian in guardians:
+            if guardian.component_id not in guardians_by_component:
+                guardians_by_component[guardian.component_id] = []
+            guardians_by_component[guardian.component_id].append(guardian)
+        
+        # Get special roles for R8, R9, R10
+        epsilon_role = roles_by_type.get("EPSILON", [None])[0]
+        omega_role = roles_by_type.get("OMEGA", [None])[0]
+        alpha_role = roles_by_type.get("ALPHA", [None])[0]
+        
+        # R8: The Ate Guard - EPSILON INBOUND components must have guardians
+        if epsilon_role:
+            epsilon_inbound_components = components_by_role.get(
+                epsilon_role.role_id, {}
+            ).get("INBOUND", [])
+            
+            for component in epsilon_inbound_components:
+                guardian_count = len(guardians_by_component.get(component.component_id, []))
+                if guardian_count < 1:
+                    raise ValueError(
+                        f"Violation of Article XI.1 (The Ate Guard): Component '{component.name}' "
+                        f"connects to EPSILON role (INBOUND) and must have an associated Guardian. "
+                        f"Found: {guardian_count} guardian(s)"
+                    )
+        
+        # R9: The Cerberus Mandate - OMEGA INBOUND component must have CERBERUS guardian
+        if omega_role:
+            omega_inbound_components = components_by_role.get(
+                omega_role.role_id, {}
+            ).get("INBOUND", [])
+            
+            for component in omega_inbound_components:
+                component_guardians = guardians_by_component.get(component.component_id, [])
+                if not component_guardians:
+                    raise ValueError(
+                        f"Violation of Article VI (The Cerberus Mandate): Component '{component.name}' "
+                        f"connects to OMEGA role (INBOUND) and must have a CERBERUS guardian. "
+                        f"Found: None"
+                    )
+                
+                # Check if any guardian is of type CERBERUS
+                has_cerberus = any(g.type == "CERBERUS" for g in component_guardians)
+                if not has_cerberus:
+                    guardian_types = [g.type for g in component_guardians]
+                    raise ValueError(
+                        f"Violation of Article VI (The Cerberus Mandate): Component '{component.name}' "
+                        f"connects to OMEGA role (INBOUND) and must have a CERBERUS guardian. "
+                        f"Found: {', '.join(guardian_types)}"
+                    )
+        
+        # R10: Topology Flow - ALPHA must have OUTBOUND, OMEGA must have INBOUND
+        if alpha_role:
+            alpha_outbound_count = len(
+                components_by_role.get(alpha_role.role_id, {}).get("OUTBOUND", [])
+            )
+            if alpha_outbound_count < 1:
+                raise ValueError(
+                    f"Violation of Article V & VII: ALPHA role must have at least one OUTBOUND "
+                    f"component. Found: {alpha_outbound_count}"
+                )
+        
+        if omega_role:
+            omega_inbound_count = len(
+                components_by_role.get(omega_role.role_id, {}).get("INBOUND", [])
+            )
+            if omega_inbound_count < 1:
+                raise ValueError(
+                    f"Violation of Article V & VII: OMEGA role must have at least one INBOUND "
+                    f"component. Found: {omega_inbound_count}"
+                )
 
     def delete_workflow(self, workflow_name: str) -> bool:
         """

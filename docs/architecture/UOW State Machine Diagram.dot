@@ -1,0 +1,79 @@
+digraph UOW_Lifecycle {
+    rankdir=TD;
+    node [fontname="Helvetica", shape=box, style="rounded,filled", fillcolor="white", penwidth=1.5];
+    edge [fontname="Helvetica", fontsize=10, penwidth=1.5];
+
+    /* ------------------------------------------------------------------
+       STATE DEFINITIONS
+       ------------------------------------------------------------------ */
+    
+    /* Entry States */
+    node [shape=ellipse, fillcolor="#E3F2FD", color="#1E88E5"]
+    INITIALIZED [label="INITIALIZED\n(Alpha Role)"];
+    CREATED     [label="CREATED\n(Beta Child)"];
+
+    /* Queue & Processing */
+    node [shape=box, fillcolor="#FFF9C4", color="#FBC02D"]
+    PENDING     [label="PENDING\n(Interaction/Queue)"];
+    
+    node [shape=box, fillcolor="#BBDEFB", color="#1976D2"]
+    IN_PROGRESS [label="IN_PROGRESS\n(Locked by Actor)"];
+
+    /* Success States */
+    node [shape=box, fillcolor="#C8E6C9", color="#388E3C"]
+    COMPLETED   [label="COMPLETED\n(Work Done)"];
+    
+    node [shape=doublecircle, fillcolor="#EEEEEE", color="#616161"]
+    FINALIZED   [label="FINALIZED\n(Omega Reconciled)"];
+    
+    node [shape=folder, fillcolor="#CFD8DC", color="#455A64"]
+    ARCHIVED    [label="ARCHIVED\n(Cold Store)"];
+
+    /* Error & Recovery States */
+    node [shape=box, fillcolor="#FFCDD2", color="#D32F2F"]
+    FAILED      [label="FAILED\n(Error/Reject)"];
+    TIMEOUT     [label="TIMEOUT\n(Chronos Path)"];
+
+    node [shape=box, fillcolor="#FFE0B2", color="#F57C00"]
+    REMEDIATED  [label="REMEDIATED\n(Epsilon Fix)"];
+
+
+    /* ------------------------------------------------------------------
+       TRANSITIONS
+       ------------------------------------------------------------------ */
+
+    /* The Happy Path (Green) */
+    INITIALIZED -> PENDING [color="#388E3C", label="Alpha Handoff"];
+    CREATED -> PENDING     [color="#388E3C", label="Beta Handoff"];
+    PENDING -> IN_PROGRESS [color="#388E3C", label="Guard Pull\n(Checkout)"];
+    IN_PROGRESS -> COMPLETED [color="#388E3C", label="Actor Success"];
+    COMPLETED -> FINALIZED [color="#388E3C", label="Omega Sync\n(Cerberus)"];
+    FINALIZED -> ARCHIVED  [color="#616161", style=dashed, label="Purge"];
+
+    /* System Mechanics (Blue) */
+    IN_PROGRESS -> PENDING [color="#1976D2", style=dotted, label="Lock Timeout\n(Lease Expiry)"];
+
+    /* The Failure Path (Red) */
+    IN_PROGRESS -> FAILED  [color="#D32F2F", label="Actor Error\nCriteria Reject"];
+    PENDING -> TIMEOUT     [color="#D32F2F", label="Stale Limit\n(Tau Sweep)"];
+    TIMEOUT -> FAILED      [color="#D32F2F", label="Escalation"];
+    FAILED -> FINALIZED    [color="#D32F2F", label="Omega Pull\n(Abort)"];
+
+    /* The Remediation Loop (Orange) */
+    /* Epsilon picks up FAILED items to fix them */
+    FAILED -> IN_PROGRESS     [color="#F57C00", style=dashed, label="Epsilon Pickup"];
+    
+    /* If Epsilon fixes it, it becomes REMEDIATED (Implied Success for Epsilon) */
+    IN_PROGRESS -> REMEDIATED [color="#F57C00", label="Epsilon Success"];
+    
+    /* Remediated items go back to queue for re-verification */
+    REMEDIATED -> PENDING     [color="#F57C00", label="Re-queue"];
+
+    /* Subgraph for alignment */
+    subgraph cluster_recovery {
+        label = "Remediation Zone";
+        style = dashed;
+        color = "#F57C00";
+        FAILED; REMEDIATED;
+    }
+}

@@ -35,14 +35,25 @@ Short, action-oriented guidance for AI coding agents (and humans using them) to 
 ## Integration & env details 🔌
 - `.env.example` contains placeholders for external AI service keys (e.g., Claude). Copy to `.env` and configure.
 - Project expects to be run locally with SQLite by default. Database URLs are passed to `DatabaseManager(template_url=...)` or `DatabaseManager(instance_url=...)`.
+- Dependencies: Install with `pip install -r requirements.txt` or `pip install -e ".[dev]"` for development tools.
+- Python 3.9+ required (see `pyproject.toml` for version compatibility).
+
+## Common pitfalls & gotchas ⚠️
+- **Do not mix Tier 1 and Tier 2 models** - They use separate declarative bases and databases. Cross-tier foreign keys will break isolation.
+- **YAML workflow names must be unique** - Re-importing deletes the existing workflow with that name (cascade delete).
+- **UUIDs are client-generated** - Always use `default=uuid.uuid4` in model definitions, not database-level UUID generation.
+- **Comments are schema requirements** - All tables and important columns must have comments for AI introspection. Tests validate this.
+- **SQLite is the default** - Use standard SQLAlchemy types (JSON, not JSONB) for database portability.
 
 ## How AI agents should help (practical guidelines) 🤖
 - When proposing code changes, reference exact files and tests to update (e.g., "Update `Template_Components` to include X; update `tests/test_schema_generation.py` to assert X").
 - For schema changes:
   - Update model comments and tests that assert comments exist.
   - Keep Tier 1 / Tier 2 separation; do not add cross-tier foreign keys unless the design explicitly requires it and tests are updated.
+  - Always add or update tests in `tests/test_schema_generation.py` to validate new tables/columns and their comments.
 - For CLI behavior (YAML import/export): preserve name-based references and cascade-delete semantics; mention potential data-loss impact in PR descriptions.
 - Use examples in `README.md` and `database/README.md` when writing docs or tests.
+- When adding dependencies: update `requirements.txt` and test with `pip install -r requirements.txt` before committing.
 
 ## Quick checklist to include in PR descriptions 🧾
 1. Describe behavior change and reason (brief). 🔍
@@ -50,6 +61,32 @@ Short, action-oriented guidance for AI coding agents (and humans using them) to 
 3. Mention any DB migration or manual steps needed (if applicable). 🧱
 4. For schema edits, confirm `tests/test_schema_generation.py` updated and passing. 🧪
 5. If altering YAML import semantics, show an example YAML snippet. 📄
+
+## Quick reference: Common commands 📋
+```bash
+# Setup
+pip install -r requirements.txt       # Install dependencies
+python verify_setup.py                # Verify environment
+
+# Testing
+pytest                                 # Run all tests
+pytest tests/test_schema_generation.py # Test database schema
+pytest --cov=chameleon_workflow_engine # Run with coverage
+
+# Code quality
+black .                                # Format code
+ruff check .                          # Lint code
+mypy chameleon_workflow_engine database # Type check
+
+# Running the server
+python -m chameleon_workflow_engine.server
+uvicorn chameleon_workflow_engine.server:app --reload --port 8000
+
+# Workflow management
+python tools/workflow_manager.py -w "WorkflowName" -e  # Export to YAML
+python tools/workflow_manager.py -l -f workflow.yml    # Import from YAML
+python tools/workflow_manager.py -w "WorkflowName" --graph  # Export DOT graph
+```
 
 ---
 

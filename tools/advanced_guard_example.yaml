@@ -1,0 +1,131 @@
+# ==============================================================================
+# CHAMELEON WORKFLOW ENGINE - ADVANCED GUARD EXAMPLES
+# ==============================================================================
+# This file serves as a reference for implementing complex guard logic as defined
+# in docs/architecture/Guard_Behavior_Specs.md.
+#
+# It demonstrates:
+# 1. Composite Guards (Stacked Logic: AND/OR chains)
+# 2. TTL Checks (Lazy Timeouts)
+# 3. Directional Filters (Routing Logic)
+# 4. Complex Criteria Gates (Data Validation)
+# ==============================================================================
+
+workflow:
+  name: "Advanced_Guard_Showcase"
+  description: "Reference implementation of complex guard patterns"
+  version: 1
+
+roles:
+  - name: "Origin"
+    role_type: "ALPHA"
+  - name: "Processor"
+    role_type: "BETA"
+    strategy: "HOMOGENEOUS"
+  - name: "Terminal"
+    role_type: "OMEGA"
+  - name: "Physician"
+    role_type: "EPSILON"
+  - name: "Chronometer"
+    role_type: "TAU"
+
+interactions:
+  - name: "Processing_Queue"
+    description: "Standard FIFO queue"
+  - name: "High_Priority_Queue"
+    description: "Fast track"
+  - name: "Review_Queue"
+    description: "Manual review"
+
+guardians:
+
+  # ----------------------------------------------------------------------------
+  # EXAMPLE 1: TTL_CHECK (The Stopwatch)
+  # ----------------------------------------------------------------------------
+  # Purpose: Reject items that have been sitting in the queue too long (Lazy Timeout).
+  # Use Case: "Flash Sale" orders that must be processed within 5 minutes.
+  - name: "Flash_Sale_Timer"
+    type: "TTL_CHECK"
+    description: "Rejects UOWs older than 300 seconds"
+    config:
+      reference_field: "created_at"  # Attribute to measure age from
+      max_age_seconds: 300          # 5 Minutes limit
+
+  # ----------------------------------------------------------------------------
+  # EXAMPLE 2: COMPOSITE GUARD (AND Logic - "The Gauntlet")
+  # ----------------------------------------------------------------------------
+  # Purpose: Stack multiple checks. ALL must pass to proceed.
+  # Use Case: High-Value transaction requires:
+  #   1. Amount > 10,000
+  #   2. Valid Region (US or EU)
+  #   3. Not Expired (TTL Check)
+  - name: "High_Value_Gauntlet"
+    type: "COMPOSITE"
+    description: "Strict multi-step validation for VIP transactions"
+    config:
+      logic: "AND"
+      steps:
+        - type: "CRITERIA_GATE"
+          config:
+            field: "amount"
+            operator: "GT"
+            threshold: 10000
+            
+        - type: "CRITERIA_GATE"
+          config:
+            field: "region"
+            operator: "IN"
+            threshold: ["US", "EU", "UK"]
+            
+        - type: "TTL_CHECK"
+          config:
+            reference_field: "auth_timestamp"
+            max_age_seconds: 60
+
+  # ----------------------------------------------------------------------------
+  # EXAMPLE 3: COMPOSITE GUARD (OR Logic - "The Any-Key")
+  # ----------------------------------------------------------------------------
+  # Purpose: Allow passage if ANY condition is met.
+  # Use Case: Fast-track approval if user is VIP *OR* order is small.
+  - name: "Fast_Track_Check"
+    type: "COMPOSITE"
+    description: "Passes if VIP or Low Value"
+    config:
+      logic: "OR"
+      steps:
+        - type: "CRITERIA_GATE"
+          config:
+            field: "user_tier"
+            operator: "EQ"
+            threshold: "VIP"
+            
+        - type: "CRITERIA_GATE"
+          config:
+            field: "amount"
+            operator: "LT"
+            threshold: 50
+
+  # ----------------------------------------------------------------------------
+  # EXAMPLE 4: DIRECTIONAL FILTER (The Switch)
+  # ----------------------------------------------------------------------------
+  # Purpose: Route to different queues based on attribute value.
+  # Note: This guard implies multiple Outbound components from the source Role.
+  - name: "Triage_Router"
+    type: "DIRECTIONAL_FILTER"
+    description: "Routes based on urgency level"
+    config:
+      routing_key: "urgency_level"
+      routes:
+        "CRITICAL": "High_Priority_Queue"
+        "NORMAL": "Processing_Queue"
+        "LOW": "Review_Queue"
+      # Implicit default: If key is missing or unknown -> Epsilon (Ate Path)
+
+components:
+  # Just showing one example linkage to demonstrate where the guard fits
+  - name: "Queue_To_Processor"
+    role_name: "Processor"
+    interaction_name: "Processing_Queue"
+    direction: "INBOUND"
+    # This component is protected by the Composite Guard defined above
+    guardian_name: "High_Value_Gauntlet"

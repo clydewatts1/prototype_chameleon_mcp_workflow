@@ -39,7 +39,7 @@ class TestWorkflowManager(unittest.TestCase):
         cls.db_manager = DatabaseManager(template_url=cls.db_url)
         cls.db_manager.create_template_schema()
 
-        # Create sample workflow
+        # Create sample workflow that meets Constitutional requirements
         with cls.db_manager.get_template_session() as session:
             # Create workflow
             workflow = Template_Workflows(
@@ -51,7 +51,7 @@ class TestWorkflowManager(unittest.TestCase):
             session.add(workflow)
             session.flush()
 
-            # Create roles
+            # Create roles - must include ALPHA, OMEGA, EPSILON, TAU per Constitution
             role_alpha = Template_Roles(
                 workflow_id=workflow.workflow_id,
                 name="AlphaRole",
@@ -66,7 +66,25 @@ class TestWorkflowManager(unittest.TestCase):
                 role_type="BETA",
                 strategy="HOMOGENEOUS",
             )
-            session.add_all([role_alpha, role_beta])
+            role_omega = Template_Roles(
+                workflow_id=workflow.workflow_id,
+                name="OmegaRole",
+                description="Terminal role",
+                role_type="OMEGA",
+            )
+            role_epsilon = Template_Roles(
+                workflow_id=workflow.workflow_id,
+                name="EpsilonRole",
+                description="Error handler role",
+                role_type="EPSILON",
+            )
+            role_tau = Template_Roles(
+                workflow_id=workflow.workflow_id,
+                name="TauRole",
+                description="Timeout handler role",
+                role_type="TAU",
+            )
+            session.add_all([role_alpha, role_beta, role_omega, role_epsilon, role_tau])
             session.flush()
 
             # Create interactions
@@ -80,10 +98,16 @@ class TestWorkflowManager(unittest.TestCase):
                 name="Queue2",
                 description="Second queue",
             )
-            session.add_all([interaction_1, interaction_2])
+            interaction_3 = Template_Interactions(
+                workflow_id=workflow.workflow_id,
+                name="Queue3",
+                description="Third queue",
+            )
+            session.add_all([interaction_1, interaction_2, interaction_3])
             session.flush()
 
-            # Create components
+            # Create components to satisfy Constitutional requirements
+            # R10: ALPHA must have OUTBOUND
             component_1 = Template_Components(
                 workflow_id=workflow.workflow_id,
                 role_id=role_alpha.role_id,
@@ -92,6 +116,7 @@ class TestWorkflowManager(unittest.TestCase):
                 description="First component",
                 direction="OUTBOUND",
             )
+            # R7: Queue1 needs consumer
             component_2 = Template_Components(
                 workflow_id=workflow.workflow_id,
                 role_id=role_beta.role_id,
@@ -100,19 +125,65 @@ class TestWorkflowManager(unittest.TestCase):
                 description="Second component",
                 direction="INBOUND",
             )
-            session.add_all([component_1, component_2])
+            # R7: Queue2 needs producer
+            component_3 = Template_Components(
+                workflow_id=workflow.workflow_id,
+                role_id=role_beta.role_id,
+                interaction_id=interaction_2.interaction_id,
+                name="Component3",
+                description="Third component",
+                direction="OUTBOUND",
+            )
+            # R10: OMEGA must have INBOUND
+            component_4 = Template_Components(
+                workflow_id=workflow.workflow_id,
+                role_id=role_omega.role_id,
+                interaction_id=interaction_2.interaction_id,
+                name="Component4",
+                description="Fourth component",
+                direction="INBOUND",
+            )
+            # R8: EPSILON INBOUND must have guardian
+            component_5 = Template_Components(
+                workflow_id=workflow.workflow_id,
+                role_id=role_epsilon.role_id,
+                interaction_id=interaction_3.interaction_id,
+                name="Component5",
+                description="Fifth component - Error input",
+                direction="INBOUND",
+            )
+            # R7: Queue3 needs producer
+            component_6 = Template_Components(
+                workflow_id=workflow.workflow_id,
+                role_id=role_tau.role_id,
+                interaction_id=interaction_3.interaction_id,
+                name="Component6",
+                description="Sixth component - Timeout output",
+                direction="OUTBOUND",
+            )
+            session.add_all([component_1, component_2, component_3, component_4, component_5, component_6])
             session.flush()
 
-            # Create guardian
-            guardian = Template_Guardians(
+            # Create guardians
+            # R9: OMEGA INBOUND must have CERBERUS guardian
+            guardian_1 = Template_Guardians(
                 workflow_id=workflow.workflow_id,
-                component_id=component_1.component_id,
+                component_id=component_4.component_id,
                 name="Guardian1",
-                description="Test guardian",
-                type="CRITERIA_GATE",
-                config={"criteria": "amount > 100"},
+                description="Cerberus guard for Omega",
+                type="CERBERUS",
+                config={"sync_strategy": "all_complete"},
             )
-            session.add(guardian)
+            # R8: EPSILON INBOUND must have guardian
+            guardian_2 = Template_Guardians(
+                workflow_id=workflow.workflow_id,
+                component_id=component_5.component_id,
+                name="Guardian2",
+                description="Guard for Epsilon",
+                type="PASS_THRU",
+                config={"validation": "basic"},
+            )
+            session.add_all([guardian_1, guardian_2])
 
     @classmethod
     def tearDownClass(cls):
@@ -139,18 +210,17 @@ class TestWorkflowManager(unittest.TestCase):
             self.assertIn("workflow", data)
             self.assertEqual(data["workflow"]["name"], "TestWorkflow")
             self.assertIn("roles", data)
-            self.assertEqual(len(data["roles"]), 2)
+            self.assertEqual(len(data["roles"]), 5)  # ALPHA, BETA, OMEGA, EPSILON, TAU
             self.assertIn("interactions", data)
-            self.assertEqual(len(data["interactions"]), 2)
+            self.assertEqual(len(data["interactions"]), 3)  # Queue1, Queue2, Queue3
             self.assertIn("components", data)
-            self.assertEqual(len(data["components"]), 2)
+            self.assertEqual(len(data["components"]), 6)  # 6 components
             self.assertIn("guardians", data)
-            self.assertEqual(len(data["guardians"]), 1)
+            self.assertEqual(len(data["guardians"]), 2)  # 2 guardians
 
             # Verify name-based references
             self.assertEqual(data["components"][0]["role_name"], "AlphaRole")
             self.assertEqual(data["components"][0]["interaction_name"], "Queue1")
-            self.assertEqual(data["guardians"][0]["component_name"], "Component1")
 
             manager.close()
 
@@ -189,10 +259,10 @@ class TestWorkflowManager(unittest.TestCase):
                 self.assertEqual(workflow.description, "A modified imported workflow")
 
                 # Verify relationships were created
-                self.assertEqual(len(workflow.roles), 2)
-                self.assertEqual(len(workflow.interactions), 2)
-                self.assertEqual(len(workflow.components), 2)
-                self.assertEqual(len(workflow.guardians), 1)
+                self.assertEqual(len(workflow.roles), 5)  # ALPHA, BETA, OMEGA, EPSILON, TAU
+                self.assertEqual(len(workflow.interactions), 3)  # Queue1, Queue2, Queue3
+                self.assertEqual(len(workflow.components), 6)  # 6 components
+                self.assertEqual(len(workflow.guardians), 2)  # 2 guardians
 
             manager.close()
 

@@ -571,7 +571,7 @@ class ChameleonEngine:
                 and_(
                     Local_Role_Attributes.role_id == role_id,
                     Local_Role_Attributes.context_type == "GLOBAL",
-                    Local_Role_Attributes.is_toxic == False,  # Filter out toxic memories
+                    Local_Role_Attributes.is_toxic.is_not(True),  # Filter out toxic memories
                 )
             )
             .all()
@@ -586,7 +586,7 @@ class ChameleonEngine:
                     Local_Role_Attributes.role_id == role_id,
                     Local_Role_Attributes.context_type == "ACTOR",
                     Local_Role_Attributes.context_id == actor_id_str,
-                    Local_Role_Attributes.is_toxic == False,  # Filter out toxic memories
+                    Local_Role_Attributes.is_toxic.is_not(True),  # Filter out toxic memories
                 )
             )
             .all()

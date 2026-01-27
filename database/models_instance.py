@@ -560,7 +560,7 @@ class Local_Role_Attributes(InstanceBase):
     context_id = Column(
         String(255),
         nullable=False,
-        comment="Context identifier: 'GLOBAL' for blueprints, or Actor UUID for personal playbooks."
+        comment="Context identifier: 'GLOBAL' for blueprints, or Actor UUID string representation (with hyphens) for personal playbooks."
     )
     actor_id = Column(
         UUID(),

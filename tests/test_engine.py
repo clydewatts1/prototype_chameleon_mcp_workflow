@@ -797,13 +797,14 @@ def test_memory_context():
                 session.flush()
                 
                 # Add initial attributes
+                # Note: Using actor1_id here since this is test setup, but the UOW will be checked out by actor2_id
                 attr = UOW_Attributes(
                     uow_id=new_uow.uow_id,
                     instance_id=instance_id,
                     key="test_key",
                     value="test_value",
                     version=1,
-                    actor_id=actor1_id,
+                    actor_id=actor1_id,  # Initial actor (test setup)
                     reasoning="Initial data"
                 )
                 session.add(attr)

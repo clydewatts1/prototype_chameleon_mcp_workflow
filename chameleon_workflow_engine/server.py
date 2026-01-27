@@ -32,16 +32,18 @@ Example:
     uvicorn chameleon_workflow_engine.server:app --reload
 """
 
-from typing import Dict, Optional
-from fastapi import FastAPI, HTTPException, Depends
+from typing import Dict, Optional, Any
+from fastapi import FastAPI, HTTPException, Depends, Response
 from pydantic import BaseModel
 from loguru import logger
 import os
 import asyncio
+import uuid
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from database import DatabaseManager, UnitsOfWork
+from chameleon_workflow_engine.engine import ChameleonEngine
 
 # Load environment variables
 load_dotenv()
@@ -86,6 +88,61 @@ class HeartbeatResponse(BaseModel):
     success: bool
     message: str
     timestamp: datetime
+
+
+# Workflow Engine API Models
+class InstantiateWorkflowRequest(BaseModel):
+    """Model for instantiating a workflow from a template"""
+    template_id: str
+    initial_context: Dict[str, Any]
+    instance_name: Optional[str] = None
+    instance_description: Optional[str] = None
+
+
+class InstantiateWorkflowResponse(BaseModel):
+    """Model for workflow instantiation response"""
+    workflow_id: str
+    message: str
+
+
+class CheckoutWorkRequest(BaseModel):
+    """Model for checking out work"""
+    actor_id: str
+    role_id: str
+
+
+class CheckoutWorkResponse(BaseModel):
+    """Model for checkout work response"""
+    uow_id: str
+    attributes: Dict[str, Any]
+
+
+class SubmitWorkRequest(BaseModel):
+    """Model for submitting work"""
+    uow_id: str
+    actor_id: str
+    result_attributes: Dict[str, Any]
+    reasoning: Optional[str] = None
+
+
+class SubmitWorkResponse(BaseModel):
+    """Model for submit work response"""
+    success: bool
+    message: str
+
+
+class ReportFailureRequest(BaseModel):
+    """Model for reporting failure"""
+    uow_id: str
+    actor_id: str
+    error_code: str
+    details: Optional[str] = None
+
+
+class ReportFailureResponse(BaseModel):
+    """Model for failure report response"""
+    success: bool
+    message: str
 
 
 # In-memory storage (replace with database in production)
@@ -165,14 +222,17 @@ async def startup_event():
     """Initialize database and start background tasks on startup"""
     global db_manager, zombie_sweeper_task
     
-    # Initialize database manager with instance database
+    # Initialize database manager with both template and instance databases
+    # Template DB for workflow templates, Instance DB for runtime state
+    template_db_url = os.getenv("TEMPLATE_DB_URL", "sqlite:///template.db")
     instance_db_url = os.getenv("INSTANCE_DB_URL", "sqlite:///instance.db")
-    db_manager = DatabaseManager(instance_url=instance_db_url)
+    db_manager = DatabaseManager(template_url=template_db_url, instance_url=instance_db_url)
     
     try:
-        # Create schema if it doesn't exist
+        # Create schemas if they don't exist
+        db_manager.create_template_schema()
         db_manager.create_instance_schema()
-        logger.info(f"Database initialized: {instance_db_url}")
+        logger.info(f"Databases initialized - Template: {template_db_url}, Instance: {instance_db_url}")
     except Exception as e:
         logger.warning(f"Database schema already exists or error: {e}")
     
@@ -346,6 +406,218 @@ async def heartbeat(
     except Exception as e:
         db.rollback()
         logger.error(f"Error processing heartbeat for UOW {uow_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# Workflow Engine API Endpoints
+
+@app.post("/workflow/instantiate", response_model=InstantiateWorkflowResponse)
+async def instantiate_workflow(request: InstantiateWorkflowRequest):
+    """
+    Instantiate a new workflow from a template.
+    
+    This endpoint creates a new workflow instance from a template,
+    cloning all roles, interactions, components, and guardians,
+    and creating the Alpha UOW with the initial context.
+    
+    Args:
+        request: Contains template_id, initial_context, and optional name/description
+        
+    Returns:
+        InstantiateWorkflowResponse with the new workflow instance ID
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Parse template_id to UUID
+        try:
+            template_uuid = uuid.UUID(request.template_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid template_id format")
+        
+        # Create engine and instantiate workflow
+        engine = ChameleonEngine(db_manager)
+        
+        instance_id = engine.instantiate_workflow(
+            template_id=template_uuid,
+            initial_context=request.initial_context,
+            instance_name=request.instance_name,
+            instance_description=request.instance_description
+        )
+        
+        logger.info(f"Workflow instantiated: instance_id={instance_id}, template_id={template_uuid}")
+        
+        return InstantiateWorkflowResponse(
+            workflow_id=str(instance_id),
+            message="Workflow instantiated successfully"
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error instantiating workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/workflow/checkout", response_model=CheckoutWorkResponse)
+async def checkout_work(request: CheckoutWorkRequest, response: Response):
+    """
+    Checkout a Unit of Work from a role's queue.
+    
+    This endpoint acquires a UOW from the specified role's inbound interactions,
+    locks it for processing, and returns the UOW ID and attributes.
+    
+    Args:
+        request: Contains actor_id and role_id
+        response: FastAPI response object for status code control
+        
+    Returns:
+        CheckoutWorkResponse with uow_id and attributes, or 204 No Content if no work available
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Parse UUIDs
+        try:
+            actor_uuid = uuid.UUID(request.actor_id)
+            role_uuid = uuid.UUID(request.role_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid actor_id or role_id format")
+        
+        # Create engine and checkout work
+        engine = ChameleonEngine(db_manager)
+        
+        result = engine.checkout_work(
+            actor_id=actor_uuid,
+            role_id=role_uuid
+        )
+        
+        if result is None:
+            # No work available - return 204 No Content
+            response.status_code = 204
+            return Response(status_code=204)
+        
+        uow_id, attributes = result
+        
+        logger.info(f"Work checked out: uow_id={uow_id}, actor_id={actor_uuid}, role_id={role_uuid}")
+        
+        return CheckoutWorkResponse(
+            uow_id=str(uow_id),
+            attributes=attributes
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error checking out work: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/workflow/submit", response_model=SubmitWorkResponse)
+async def submit_work(request: SubmitWorkRequest):
+    """
+    Submit completed work for a Unit of Work.
+    
+    This endpoint submits the results of a completed task, implementing
+    atomic versioning and transitioning the UOW to COMPLETED status.
+    
+    Args:
+        request: Contains uow_id, actor_id, result_attributes, and optional reasoning
+        
+    Returns:
+        SubmitWorkResponse with success status
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Parse UUIDs
+        try:
+            uow_uuid = uuid.UUID(request.uow_id)
+            actor_uuid = uuid.UUID(request.actor_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uow_id or actor_id format")
+        
+        # Create engine and submit work
+        engine = ChameleonEngine(db_manager)
+        
+        success = engine.submit_work(
+            uow_id=uow_uuid,
+            actor_id=actor_uuid,
+            result_attributes=request.result_attributes,
+            reasoning=request.reasoning
+        )
+        
+        logger.info(f"Work submitted: uow_id={uow_uuid}, actor_id={actor_uuid}")
+        
+        return SubmitWorkResponse(
+            success=success,
+            message="Work submitted successfully"
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error submitting work: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/workflow/failure", response_model=ReportFailureResponse)
+async def report_failure(request: ReportFailureRequest):
+    """
+    Report a failure for a Unit of Work.
+    
+    This endpoint flags a UOW as failed, triggering the Ate Path (Epsilon role)
+    for error handling.
+    
+    Args:
+        request: Contains uow_id, actor_id, error_code, and optional details
+        
+    Returns:
+        ReportFailureResponse with success status
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Parse UUIDs
+        try:
+            uow_uuid = uuid.UUID(request.uow_id)
+            actor_uuid = uuid.UUID(request.actor_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uow_id or actor_id format")
+        
+        # Create engine and report failure
+        engine = ChameleonEngine(db_manager)
+        
+        success = engine.report_failure(
+            uow_id=uow_uuid,
+            actor_id=actor_uuid,
+            error_code=request.error_code,
+            details=request.details
+        )
+        
+        logger.info(f"Failure reported: uow_id={uow_uuid}, actor_id={actor_uuid}, error_code={request.error_code}")
+        
+        return ReportFailureResponse(
+            success=success,
+            message="Failure reported successfully"
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error reporting failure: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

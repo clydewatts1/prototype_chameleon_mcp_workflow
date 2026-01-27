@@ -12,10 +12,12 @@ References:
 """
 
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
+from dateutil.parser import isoparse
 
 from database.manager import DatabaseManager
 from database.models_template import (
@@ -45,6 +47,9 @@ from database.enums import (
 # Well-known system actor ID for automated operations
 # This ensures consistent identity across all system-initiated operations
 SYSTEM_ACTOR_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+# Logger for the engine
+logger = logging.getLogger(__name__)
 
 
 class ChameleonEngine:
@@ -340,6 +345,30 @@ class ChameleonEngine:
                     instance_session.rollback()
                     raise RuntimeError(f"Failed to instantiate workflow: {str(e)}") from e
 
+    def _create_temp_guard(
+        self, parent_guard: Local_Guardians, step_config: Dict[str, Any]
+    ) -> Local_Guardians:
+        """
+        Create a temporary guard object for COMPOSITE step evaluation.
+
+        This is a lightweight helper to avoid duplicating guard object creation logic.
+
+        Args:
+            parent_guard: The parent COMPOSITE guard
+            step_config: The step configuration containing type and config
+
+        Returns:
+            A temporary Local_Guardians object for evaluation
+        """
+        return Local_Guardians(
+            guardian_id=uuid.uuid4(),
+            local_workflow_id=parent_guard.local_workflow_id,
+            component_id=parent_guard.component_id,
+            name=f"{parent_guard.name}_step",
+            type=step_config.get("type"),
+            attributes=step_config.get("config", {}),
+        )
+
     def _evaluate_guard(
         self,
         guard: Local_Guardians,
@@ -429,8 +458,6 @@ class ChameleonEngine:
             try:
                 if isinstance(timestamp_value, str):
                     # Parse ISO 8601 string
-                    from dateutil.parser import isoparse
-
                     reference_time = isoparse(timestamp_value)
                 elif isinstance(timestamp_value, datetime):
                     reference_time = timestamp_value
@@ -466,14 +493,7 @@ class ChameleonEngine:
             if logic == "AND":
                 # All steps must pass
                 for step in steps:
-                    step_guard = Local_Guardians(
-                        guardian_id=uuid.uuid4(),
-                        local_workflow_id=guard.local_workflow_id,
-                        component_id=guard.component_id,
-                        name=f"{guard.name}_step",
-                        type=step.get("type"),
-                        attributes=step.get("config", {}),
-                    )
+                    step_guard = self._create_temp_guard(guard, step)
 
                     # Recursively evaluate the step
                     if not self._evaluate_guard(step_guard, uow, uow_attributes, session):
@@ -486,14 +506,7 @@ class ChameleonEngine:
             elif logic == "OR":
                 # At least one step must pass
                 for step in steps:
-                    step_guard = Local_Guardians(
-                        guardian_id=uuid.uuid4(),
-                        local_workflow_id=guard.local_workflow_id,
-                        component_id=guard.component_id,
-                        name=f"{guard.name}_step",
-                        type=step.get("type"),
-                        attributes=step.get("config", {}),
-                    )
+                    step_guard = self._create_temp_guard(guard, step)
 
                     # Recursively evaluate the step
                     if self._evaluate_guard(step_guard, uow, uow_attributes, session):
@@ -660,7 +673,11 @@ class ChameleonEngine:
                             # Guard evaluation error - treat as rejection
                             guard_passed = False
                             # Log the error for debugging
-                            print(f"Guard evaluation error for UOW {candidate_uow.uow_id}: {e}")
+                            logger.warning(
+                                "Guard evaluation error for UOW %s: %s",
+                                candidate_uow.uow_id,
+                                str(e),
+                            )
 
                     if not guard_passed:
                         # Guard rejected the UOW - route to Ate Path (Epsilon)

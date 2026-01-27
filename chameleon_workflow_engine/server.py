@@ -33,33 +33,69 @@ Example:
 """
 
 from typing import Dict, Optional, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Response
 from pydantic import BaseModel
 from loguru import logger
-import os
 import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
-from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from database import DatabaseManager, UnitsOfWork
 from chameleon_workflow_engine.engine import ChameleonEngine
-
-# Load environment variables
-load_dotenv()
-
-# Initialize FastAPI app
-app = FastAPI(
-    title="Chameleon Workflow Engine",
-    description="MCP workflow orchestration engine for AI agents",
-    version="0.1.0",
-)
+from common.config import TEMPLATE_DB_URL, INSTANCE_DB_URL
 
 # Initialize database manager (will be configured on startup)
 db_manager: Optional[DatabaseManager] = None
 
 # Background task handle
 zombie_sweeper_task: Optional[asyncio.Task] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    global db_manager, zombie_sweeper_task
+
+    # Startup: Initialize database and start background tasks
+    logger.info(f"Connecting to Template DB: {TEMPLATE_DB_URL}")
+    logger.info(f"Connecting to Instance DB: {INSTANCE_DB_URL}")
+    
+    db_manager = DatabaseManager(template_url=TEMPLATE_DB_URL, instance_url=INSTANCE_DB_URL)
+
+    try:
+        # Create schemas if they don't exist
+        db_manager.create_template_schema()
+        db_manager.create_instance_schema()
+        logger.info(
+            f"Databases initialized - Template: {TEMPLATE_DB_URL}, Instance: {INSTANCE_DB_URL}"
+        )
+    except Exception as e:
+        logger.warning(f"Database schema already exists or error: {e}")
+
+    # Start zombie sweeper background task
+    zombie_sweeper_task = asyncio.create_task(run_tau_zombie_sweeper())
+    logger.info("Zombie Actor Sweeper task started")
+
+    yield
+
+    # Shutdown: Clean up background tasks
+    if zombie_sweeper_task:
+        zombie_sweeper_task.cancel()
+        try:
+            await zombie_sweeper_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Zombie Actor Sweeper task stopped")
+
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(
+    title="Chameleon Workflow Engine",
+    description="MCP workflow orchestration engine for AI agents",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 
 # Data Models
@@ -275,46 +311,6 @@ async def run_tau_zombie_sweeper():
         except Exception as e:
             logger.error(f"Unexpected error in zombie sweeper: {e}")
             await asyncio.sleep(60)  # Wait before retrying
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and start background tasks on startup"""
-    global db_manager, zombie_sweeper_task
-
-    # Initialize database manager with both template and instance databases
-    # Template DB for workflow templates, Instance DB for runtime state
-    template_db_url = os.getenv("TEMPLATE_DB_URL", "sqlite:///template.db")
-    instance_db_url = os.getenv("INSTANCE_DB_URL", "sqlite:///instance.db")
-    db_manager = DatabaseManager(template_url=template_db_url, instance_url=instance_db_url)
-
-    try:
-        # Create schemas if they don't exist
-        db_manager.create_template_schema()
-        db_manager.create_instance_schema()
-        logger.info(
-            f"Databases initialized - Template: {template_db_url}, Instance: {instance_db_url}"
-        )
-    except Exception as e:
-        logger.warning(f"Database schema already exists or error: {e}")
-
-    # Start zombie sweeper background task
-    zombie_sweeper_task = asyncio.create_task(run_tau_zombie_sweeper())
-    logger.info("Zombie Actor Sweeper task started")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up background tasks on shutdown"""
-    global zombie_sweeper_task
-
-    if zombie_sweeper_task:
-        zombie_sweeper_task.cancel()
-        try:
-            await zombie_sweeper_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Zombie Actor Sweeper task stopped")
 
 
 @app.get("/")
@@ -829,6 +825,7 @@ async def mark_memory_toxic_endpoint(request: MarkMemoryToxicRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    import os
 
     host = os.getenv("WORKFLOW_ENGINE_HOST", "0.0.0.0")
     port = int(os.getenv("WORKFLOW_ENGINE_PORT", 8000))

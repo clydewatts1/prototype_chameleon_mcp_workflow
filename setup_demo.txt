@@ -1,0 +1,15 @@
+================================================================================
+Chameleon Workflow Engine - Mixed Agent Demo Setup
+================================================================================
+
+Traceback (most recent call last):
+  File "C:\Users\cw171001\Projects\prototype_chameleon_mcp_workflow\examples\setup_demo.py", line 122, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\cw171001\Projects\prototype_chameleon_mcp_workflow\examples\setup_demo.py", line 47, in main
+    print(f"\u2705 Workflow found: {workflow.name}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>

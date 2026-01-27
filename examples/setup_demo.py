@@ -27,7 +27,7 @@ def main():
     print()
 
     # Check if workflow is already imported
-    db = DatabaseManager(template_url="sqlite:///chameleon_workflow.db")
+    db = DatabaseManager(template_url="sqlite:///template.db")
 
     with db.get_template_session() as session:
         workflow = (
@@ -77,23 +77,20 @@ def main():
     print("🚀 Setup Instructions")
     print("=" * 80)
     print()
+    print("⚠️  IMPORTANT: Template Role IDs shown above are NOT used by agents!")
+    print("   Agents need LOCAL Role IDs from the instantiated workflow.")
+    print()
     print("1. Start the Chameleon Workflow Engine server:")
     print("   python -m chameleon_workflow_engine.server")
     print()
-    print("2. In separate terminal windows, start each agent:")
+    print("2. Instantiate a workflow instance via the API:")
     print()
-    print("   Terminal 1 - AI Agent:")
-    print(f"   python examples/ai_agent.py --role-id {role_ids['AI_Analyzer']}")
+    print("   PowerShell:")
+    instantiate_cmd = f'curl -X POST http://localhost:8000/workflow/instantiate -H "Content-Type: application/json" -d \'{{"template_id":"{workflow_id}","initial_context":{{"input_text":"The quick brown fox jumps over the lazy dog. This is a test of the Chameleon Workflow Engine with mixed agent types."}},"instance_name":"Demo Workflow Instance","instance_description":"Testing the mixed agent workflow"}}\''
+    print(f"   {instantiate_cmd}")
     print()
-    print("   Terminal 2 - Auto Agent:")
-    print(f"   python examples/auto_agent.py --role-id {role_ids['Auto_Calculator']}")
-    print()
-    print("   Terminal 3 - Human Agent:")
-    print(f"   python examples/human_agent.py --role-id {role_ids['Human_Approver']}")
-    print()
-    print("3. Instantiate a workflow instance via the API:")
-    print(f"""
-   curl -X POST http://localhost:8000/workflow/instantiate \\
+    print("   Bash/Linux:")
+    print(f"""   curl -X POST http://localhost:8000/workflow/instantiate \\
      -H "Content-Type: application/json" \\
      -d '{{
        "template_id": "{workflow_id}",
@@ -105,7 +102,29 @@ def main():
      }}'
 """)
     print()
-    print("4. Watch the agents process the work!")
+    print("3. After instantiation, query the instance DB for LOCAL role IDs:")
+    print()
+    print("   python -c \"\"\"")
+    print("import sqlite3")
+    print("conn = sqlite3.connect('instance.db')")
+    print("cur = conn.cursor()")
+    print("cur.execute('SELECT role_id, name, role_type FROM Local_Roles ORDER BY name')")
+    print("for row in cur.fetchall():")
+    print("    print(f'{row[1]:20s} ({row[2]:10s}): {row[0]}')")
+    print("\"\"\"")
+    print()
+    print("4. In separate terminal windows, start agents with LOCAL role IDs:")
+    print()
+    print("   Terminal 1 - AI Agent:")
+    print("   python examples/ai_agent.py --role-id <AI_Analyzer_LOCAL_ID>")
+    print()
+    print("   Terminal 2 - Auto Agent:")
+    print("   python examples/auto_agent.py --role-id <Auto_Calculator_LOCAL_ID>")
+    print()
+    print("   Terminal 3 - Human Agent:")
+    print("   python examples/human_agent.py --role-id <Human_Approver_LOCAL_ID>")
+    print()
+    print("5. Watch the agents process the work!")
     print()
     print("=" * 80)
     print("📚 Additional Resources")

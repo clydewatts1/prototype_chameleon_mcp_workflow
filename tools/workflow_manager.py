@@ -32,6 +32,7 @@ from database.models_template import (
     Template_Components,
     Template_Guardians,
 )
+from common.config import TEMPLATE_DB_URL
 
 
 class WorkflowManager:
@@ -738,8 +739,8 @@ def main():
     )
     parser.add_argument(
         "--db",
-        default="sqlite:///chameleon_workflow.db",
-        help="Database URL (default: sqlite:///chameleon_workflow.db)",
+        default=TEMPLATE_DB_URL,
+        help=f"Database URL (default: {TEMPLATE_DB_URL})",
     )
 
     args = parser.parse_args()

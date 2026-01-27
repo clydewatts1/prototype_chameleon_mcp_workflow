@@ -96,9 +96,16 @@ st.markdown(
 
 
 def get_db_manager(db_url: str) -> DatabaseManager:
-    """Initialize database manager with caching."""
+    """Initialize database manager with caching and ensure schema exists."""
     if "db_manager" not in st.session_state or st.session_state.get("db_url") != db_url:
-        st.session_state.db_manager = DatabaseManager(instance_url=db_url)
+        manager = DatabaseManager(instance_url=db_url)
+        # Ensure the schema exists
+        try:
+            manager.create_instance_schema()
+        except Exception:
+            # Schema already exists, that's fine
+            pass
+        st.session_state.db_manager = manager
         st.session_state.db_url = db_url
     return st.session_state.db_manager
 

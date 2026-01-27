@@ -38,6 +38,11 @@ from database import (  # noqa: E402
     Template_Components,
     Template_Guardians,
     # Tier 2 Models
+    Local_Workflows,
+    Local_Roles,
+    Local_Interactions,
+    Local_Components,
+    Local_Guardians,
     UnitsOfWork,
     UOW_Attributes,
     # Enums
@@ -395,6 +400,51 @@ def test_instantiate_workflow_api(test_client):
         assert attr_dict["task_id"] == "TASK-001"
 
     print(f"✓ test_instantiate_workflow_api passed - workflow_id: {workflow_id}")
+
+
+def test_instantiate_populates_instance_tables(test_client):
+    """Ensure template artifacts are cloned into the instance-tier tables."""
+
+    response = test_client.post(
+        "/workflow/instantiate",
+        json={
+            "template_id": str(test_client.template_id),
+            "initial_context": {"seed": "value"},
+            "instance_name": "Clone Verification",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    instance_id = uuid.UUID(response.json()["workflow_id"])
+
+    with test_client.db_manager.get_instance_session() as session:
+        local_workflow = session.query(Local_Workflows).filter(
+            Local_Workflows.instance_id == instance_id
+        ).first()
+        assert local_workflow is not None
+
+        roles = session.query(Local_Roles).filter(
+            Local_Roles.local_workflow_id == local_workflow.local_workflow_id
+        ).all()
+        assert len(roles) == 4
+
+        interactions = session.query(Local_Interactions).filter(
+            Local_Interactions.local_workflow_id == local_workflow.local_workflow_id
+        ).all()
+        assert len(interactions) == 3
+
+        components = session.query(Local_Components).filter(
+            Local_Components.local_workflow_id == local_workflow.local_workflow_id
+        ).all()
+        assert len(components) == 6
+
+        guardians = session.query(Local_Guardians).filter(
+            Local_Guardians.local_workflow_id == local_workflow.local_workflow_id
+        ).all()
+        assert len(guardians) == 4
+
+        uows = session.query(UnitsOfWork).filter(UnitsOfWork.instance_id == instance_id).all()
+        assert len(uows) == 1
 
 
 def test_checkout_work_api_success(test_client):

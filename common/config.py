@@ -77,5 +77,7 @@ class Config:
 # Load environment variables once at import so module-level constants work
 _config = Config()
 
-# Common configuration values
-DATABASE_URL = Config.get("DATABASE_URL", "sqlite:///./chameleon_workflow.db")
+# --- Standardized Database Configurations ---
+# Shared by Server, Tools, and Tests
+TEMPLATE_DB_URL = Config.get("TEMPLATE_DB_URL", "sqlite:///template.db")
+INSTANCE_DB_URL = Config.get("INSTANCE_DB_URL", "sqlite:///instance.db")

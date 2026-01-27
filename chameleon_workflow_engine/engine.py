@@ -580,14 +580,14 @@ class ChameleonEngine:
         
         # Validate the learned_rule structure
         if not isinstance(learned_rule, dict):
-            logger.warning(f"Invalid _learned_rule format (not a dict): {learned_rule}")
+            logger.warning("Invalid _learned_rule format: not a dictionary")
             return
         
         rule_key = learned_rule.get("key")
         rule_value = learned_rule.get("value")
         
         if not rule_key:
-            logger.warning(f"Invalid _learned_rule format (missing 'key'): {learned_rule}")
+            logger.warning("Invalid _learned_rule format: missing 'key' field")
             return
         
         # Create context_id from actor_id (string representation with hyphens)
@@ -1052,17 +1052,16 @@ class ChameleonEngine:
                     # Find the role that has an INBOUND component from this interaction
                     role_id_for_learning = None
                     
-                    # Query components to find which role reads from this interaction
-                    components = session.query(Local_Components).filter(
-                        Local_Components.interaction_id == uow.current_interaction_id
-                    ).all()
+                    # Query for INBOUND components only (optimization)
+                    inbound_component = session.query(Local_Components).filter(
+                        and_(
+                            Local_Components.interaction_id == uow.current_interaction_id,
+                            Local_Components.direction == ComponentDirection.INBOUND.value
+                        )
+                    ).first()
                     
-                    # Look for an INBOUND component (role reading FROM this interaction)
-                    # This tells us which role is processing work from this interaction
-                    for comp in components:
-                        if comp.direction == ComponentDirection.INBOUND.value:
-                            role_id_for_learning = comp.role_id
-                            break
+                    if inbound_component:
+                        role_id_for_learning = inbound_component.role_id
                     
                     # If we found a role, harvest the experience
                     if role_id_for_learning:

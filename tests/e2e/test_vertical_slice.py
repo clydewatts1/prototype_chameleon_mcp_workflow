@@ -6,7 +6,7 @@ This test implements the complete lifecycle validation as specified in:
 - UOW Lifecycle Specs (Valid state transitions)
 
 Test Scenario: Complete UOW Lifecycle from Instantiation to Completion
-1. Setup: Load complete_workflow_example.yaml into the DB
+1. Setup: Create a simple but complete workflow template programmatically
 2. Instantiate: Call engine.instantiate_workflow() and verify Alpha UOW exists
 3. Beta Checkout: Simulate a processor calling checkout_work()
 4. Beta Submit: Simulate the processor calling submit_work() with results
@@ -427,7 +427,7 @@ def test_vertical_slice_happy_path(db_manager, loaded_workflow_template):
     
     # First, we need to find a Beta role ID to checkout from
     with db_manager.get_instance_session() as session:
-        # Find the Beta role (Invoice_Validator from the YAML)
+        # Find the Beta role (Processor role from the template)
         local_workflow = session.query(Local_Workflows).filter(
             Local_Workflows.instance_id == instance_id
         ).first()

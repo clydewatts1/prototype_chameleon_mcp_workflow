@@ -15,7 +15,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from dateutil.parser import isoparse
 
@@ -541,6 +541,95 @@ class ChameleonEngine:
         else:
             raise ValueError(f"Unknown guard type: {guard_type}")
 
+    def _harvest_experience(
+        self,
+        session: Session,
+        uow: UnitsOfWork,
+        actor_id: uuid.UUID,
+        role_id: uuid.UUID,
+        result_attributes: Dict[str, Any],
+    ) -> None:
+        """
+        Harvest learning from completed work (Experience Extraction).
+        
+        Implements Memory & Learning Specs Section 2.1: Experience Extraction (The Harvest).
+        
+        This is a prototype implementation using a rule-based harvester.
+        In production, this would be replaced with AI-powered pattern analysis.
+        
+        Rule-Based Harvester Logic:
+        - Look for a reserved key `_learned_rule` in result_attributes
+        - Structure: {"_learned_rule": {"key": "rule_name", "value": rule_value}}
+        - If found, create or update a record in Local_Role_Attributes
+        - Context: ACTOR-specific (Personal Playbook)
+        - Confidence: 1.0 (user explicitly taught this)
+        
+        Args:
+            session: Database session
+            uow: The Unit of Work being completed
+            actor_id: The actor who completed the work
+            role_id: The role context for this work
+            result_attributes: The submitted work attributes (may contain _learned_rule)
+        """
+        # Check if result_attributes contains the learning key
+        learned_rule = result_attributes.get("_learned_rule")
+        
+        if not learned_rule:
+            # No learning to harvest
+            return
+        
+        # Validate the learned_rule structure
+        if not isinstance(learned_rule, dict):
+            logger.warning("Invalid _learned_rule format: not a dictionary")
+            return
+        
+        rule_key = learned_rule.get("key")
+        rule_value = learned_rule.get("value")
+        
+        if not rule_key:
+            logger.warning("Invalid _learned_rule format: missing 'key' field")
+            return
+        
+        # Create context_id from actor_id (string representation with hyphens)
+        context_id = str(actor_id)
+        
+        # Check if a memory attribute already exists for this actor+role+key
+        existing_memory = session.query(Local_Role_Attributes).filter(
+            and_(
+                Local_Role_Attributes.role_id == role_id,
+                Local_Role_Attributes.context_type == "ACTOR",
+                Local_Role_Attributes.context_id == context_id,
+                Local_Role_Attributes.key == rule_key,
+            )
+        ).first()
+        
+        if existing_memory:
+            # Update existing memory
+            existing_memory.value = rule_value
+            existing_memory.confidence_score = 100  # User-taught, 100% confidence (0-100 scale)
+            existing_memory.last_accessed_at = datetime.now(timezone.utc)
+            logger.info(f"Updated memory for actor {actor_id}, role {role_id}, key '{rule_key}'")
+        else:
+            # Create new memory attribute
+            memory_attr = Local_Role_Attributes(
+                memory_id=uuid.uuid4(),
+                instance_id=uow.instance_id,
+                role_id=role_id,
+                context_type="ACTOR",
+                context_id=context_id,
+                actor_id=actor_id,
+                key=rule_key,
+                value=rule_value,
+                confidence_score=100,  # User-taught, 100% confidence (0-100 scale)
+                is_toxic=False,
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
+            )
+            session.add(memory_attr)
+            logger.info(f"Created new memory for actor {actor_id}, role {role_id}, key '{rule_key}'")
+        
+        session.flush()
+
     def _build_memory_context(
         self, session: Session, role_id: uuid.UUID, actor_id: uuid.UUID
     ) -> Dict[str, Any]:
@@ -930,7 +1019,12 @@ class ChameleonEngine:
                         version_map[attr.key] = attr.version
 
                 # Step 3: Atomic Versioning - Create new attribute records for changes
+                # Filter out reserved learning key - it should not be saved to UOW attributes
                 for key, new_value in result_attributes.items():
+                    # Skip the reserved learning key - it's processed by the learning loop
+                    if key == "_learned_rule":
+                        continue
+                    
                     # Check if this is a new key or modified value
                     if key not in current_state or current_state[key] != new_value:
                         new_version = version_map.get(key, 0) + 1
@@ -948,6 +1042,41 @@ class ChameleonEngine:
                         session.add(uow_attr)
 
                 session.flush()
+
+                # Step 3.5: Trigger Learning Loop (Experience Extraction)
+                # This must happen BEFORE status update but AFTER attributes are saved
+                # Learning failures should not rollback work submission
+                try:
+                    # We need to get the role_id from the UOW's current context
+                    # The UOW is in an interaction that the role reads from (INBOUND to the role)
+                    # Find the role that has an INBOUND component from this interaction
+                    role_id_for_learning = None
+                    
+                    # Query for INBOUND components only (optimization)
+                    inbound_component = session.query(Local_Components).filter(
+                        and_(
+                            Local_Components.interaction_id == uow.current_interaction_id,
+                            Local_Components.direction == ComponentDirection.INBOUND.value
+                        )
+                    ).first()
+                    
+                    if inbound_component:
+                        role_id_for_learning = inbound_component.role_id
+                    
+                    # If we found a role, harvest the experience
+                    if role_id_for_learning:
+                        self._harvest_experience(
+                            session=session,
+                            uow=uow,
+                            actor_id=actor_id,
+                            role_id=role_id_for_learning,
+                            result_attributes=result_attributes
+                        )
+                    else:
+                        logger.debug(f"No role found for learning at interaction {uow.current_interaction_id}")
+                except Exception as learning_error:
+                    # Log the error but don't fail the submission
+                    logger.warning(f"Learning loop failed for UOW {uow_id}: {learning_error}")
 
                 # Step 4: Update UOW Status to COMPLETED
                 uow.status = UOWStatus.COMPLETED.value
@@ -1096,3 +1225,87 @@ class ChameleonEngine:
             except Exception as e:
                 session.rollback()
                 raise RuntimeError(f"Failed to report failure: {str(e)}") from e
+
+    def get_memory(
+        self,
+        actor_id: uuid.UUID,
+        role_id: uuid.UUID,
+        query: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        """
+        Retrieve memory attributes for a specific actor and role context.
+        
+        Implements Memory & Learning Specs Section 5: Interface for Actors (Read Access).
+        
+        This method allows actors to query their accumulated knowledge:
+        - Global Blueprints (shared institutional knowledge)
+        - Personal Playbook (actor-specific learned patterns)
+        
+        Args:
+            actor_id: The actor requesting memory access
+            role_id: The role context to query
+            query: Optional search string to filter keys (case-insensitive substring match)
+        
+        Returns:
+            List of memory records, each containing:
+            - memory_id: UUID of the memory record
+            - key: The memory key
+            - value: The stored value/rule
+            - context_type: 'GLOBAL' or 'ACTOR'
+            - confidence_score: Confidence level (0-100)
+            - created_at: When the memory was created
+            - last_accessed_at: When last accessed
+        
+        Raises:
+            RuntimeError: If query fails
+        """
+        with self.db_manager.get_instance_session() as session:
+            try:
+                # Build the base query
+                # Include both GLOBAL memories and actor-specific memories
+                actor_id_str = str(actor_id)
+                
+                base_query = session.query(Local_Role_Attributes).filter(
+                    and_(
+                        Local_Role_Attributes.role_id == role_id,
+                        Local_Role_Attributes.is_toxic.is_not(True),  # Exclude toxic memories
+                    )
+                )
+                
+                # Filter by context: GLOBAL or ACTOR-specific
+                context_filter = or_(
+                    Local_Role_Attributes.context_type == "GLOBAL",
+                    and_(
+                        Local_Role_Attributes.context_type == "ACTOR",
+                        Local_Role_Attributes.context_id == actor_id_str,
+                    )
+                )
+                
+                base_query = base_query.filter(context_filter)
+                
+                # Apply search query if provided (simple substring match on key)
+                if query:
+                    base_query = base_query.filter(
+                        Local_Role_Attributes.key.ilike(f"%{query}%")
+                    )
+                
+                # Execute query
+                memories = base_query.all()
+                
+                # Convert to dictionary list
+                results = []
+                for memory in memories:
+                    results.append({
+                        "memory_id": str(memory.memory_id),
+                        "key": memory.key,
+                        "value": memory.value,
+                        "context_type": memory.context_type,
+                        "confidence_score": memory.confidence_score,
+                        "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                        "last_accessed_at": memory.last_accessed_at.isoformat() if memory.last_accessed_at else None,
+                    })
+                
+                return results
+                
+            except Exception as e:
+                raise RuntimeError(f"Failed to retrieve memory: {str(e)}") from e

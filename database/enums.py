@@ -50,6 +50,8 @@ class GuardianType(str, Enum):
     PASS_THRU = "PASS_THRU"  # Identity-only validation for rapid transit
     CRITERIA_GATE = "CRITERIA_GATE"  # Data-driven threshold enforcement
     DIRECTIONAL_FILTER = "DIRECTIONAL_FILTER"  # Routes UOW sets based on attribute results
+    TTL_CHECK = "TTL_CHECK"  # Time-to-live validation based on age of UOW
+    COMPOSITE = "COMPOSITE"  # Chains multiple guard checks with AND/OR logic
 
 
 class InstanceStatus(str, Enum):

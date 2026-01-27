@@ -40,6 +40,7 @@ from database.enums import (
     RoleType,
     UOWStatus,
     ComponentDirection,
+    GuardianType,
 )
 
 # Well-known system actor ID for automated operations
@@ -313,6 +314,192 @@ class ChameleonEngine:
                     instance_session.rollback()
                     raise RuntimeError(f"Failed to instantiate workflow: {str(e)}") from e
 
+    def _evaluate_guard(
+        self,
+        guard: Local_Guardians,
+        uow: UnitsOfWork,
+        uow_attributes: Dict[str, Any],
+        session: Session
+    ) -> bool:
+        """
+        Evaluate a guard against a Unit of Work.
+        
+        Implements Guard Behavior Specifications for all guard types:
+        - PASS_THRU: Always returns True
+        - CRITERIA_GATE: Evaluate UOW attributes against operator and threshold
+        - TTL_CHECK: Check age of UOW against max_age
+        - COMPOSITE: Chain multiple guard checks with AND/OR logic
+        - DIRECTIONAL_FILTER: Check routing key (not blocking, just routing)
+        
+        Args:
+            guard: The guard configuration
+            uow: The Unit of Work being evaluated
+            uow_attributes: Dictionary of UOW attributes (key -> value)
+            session: Database session for any lookups
+            
+        Returns:
+            True if the guard passes, False if it rejects the UOW
+            
+        Raises:
+            ValueError: If guard type is unknown or configuration is invalid
+        """
+        guard_type = guard.type
+        config = guard.attributes or {}
+        
+        # PASS_THRU: Always allow passage
+        if guard_type == GuardianType.PASS_THRU.value:
+            return True
+        
+        # CRITERIA_GATE: Evaluate field against operator and threshold
+        elif guard_type == GuardianType.CRITERIA_GATE.value:
+            field = config.get('field')
+            operator = config.get('operator')
+            threshold = config.get('threshold')
+            
+            if not field or not operator:
+                # Missing configuration - default to reject for safety
+                return False
+            
+            # Get the field value from UOW attributes
+            field_value = uow_attributes.get(field)
+            
+            if field_value is None:
+                # Missing attribute - reject
+                return False
+            
+            # Evaluate based on operator
+            if operator == 'GT':
+                return field_value > threshold
+            elif operator == 'LT':
+                return field_value < threshold
+            elif operator == 'EQ':
+                return field_value == threshold
+            elif operator == 'IN':
+                # threshold should be a list/array
+                if not isinstance(threshold, (list, tuple)):
+                    return False
+                return field_value in threshold
+            else:
+                # Unknown operator - reject
+                return False
+        
+        # TTL_CHECK: Check age against max_age_seconds
+        elif guard_type == GuardianType.TTL_CHECK.value:
+            reference_field = config.get('reference_field')
+            max_age_seconds = config.get('max_age_seconds')
+            
+            if not reference_field or max_age_seconds is None:
+                # Missing configuration - reject
+                return False
+            
+            # Get the timestamp field
+            timestamp_value = uow_attributes.get(reference_field)
+            
+            if timestamp_value is None:
+                # Missing timestamp - reject
+                return False
+            
+            # Parse timestamp (handle ISO strings or datetime objects)
+            try:
+                if isinstance(timestamp_value, str):
+                    # Parse ISO 8601 string
+                    from dateutil.parser import isoparse
+                    reference_time = isoparse(timestamp_value)
+                elif isinstance(timestamp_value, datetime):
+                    reference_time = timestamp_value
+                else:
+                    # Unknown format - reject
+                    return False
+                
+                # Ensure timezone awareness
+                if reference_time.tzinfo is None:
+                    reference_time = reference_time.replace(tzinfo=timezone.utc)
+                
+                # Calculate age
+                now = datetime.now(timezone.utc)
+                age_seconds = (now - reference_time).total_seconds()
+                
+                # Check if within TTL
+                return age_seconds <= max_age_seconds
+                
+            except Exception:
+                # Parse error - reject
+                return False
+        
+        # COMPOSITE: Chain multiple checks with AND/OR logic
+        elif guard_type == GuardianType.COMPOSITE.value:
+            logic = config.get('logic', 'AND').upper()
+            steps = config.get('steps', [])
+            
+            if not steps:
+                # No steps - default to reject
+                return False
+            
+            # Create temporary guard objects for each step
+            if logic == 'AND':
+                # All steps must pass
+                for step in steps:
+                    step_guard = Local_Guardians(
+                        guardian_id=uuid.uuid4(),
+                        local_workflow_id=guard.local_workflow_id,
+                        component_id=guard.component_id,
+                        name=f"{guard.name}_step",
+                        type=step.get('type'),
+                        attributes=step.get('config', {})
+                    )
+                    
+                    # Recursively evaluate the step
+                    if not self._evaluate_guard(step_guard, uow, uow_attributes, session):
+                        # One step failed - entire composite fails
+                        return False
+                
+                # All steps passed
+                return True
+            
+            elif logic == 'OR':
+                # At least one step must pass
+                for step in steps:
+                    step_guard = Local_Guardians(
+                        guardian_id=uuid.uuid4(),
+                        local_workflow_id=guard.local_workflow_id,
+                        component_id=guard.component_id,
+                        name=f"{guard.name}_step",
+                        type=step.get('type'),
+                        attributes=step.get('config', {})
+                    )
+                    
+                    # Recursively evaluate the step
+                    if self._evaluate_guard(step_guard, uow, uow_attributes, session):
+                        # One step passed - entire composite passes
+                        return True
+                
+                # All steps failed
+                return False
+            
+            else:
+                # Unknown logic type - reject
+                return False
+        
+        # DIRECTIONAL_FILTER: Check routing (not blocking in guard evaluation)
+        # This type is for routing, not for blocking, so it always passes
+        # The routing decision is made elsewhere in the flow
+        elif guard_type == GuardianType.DIRECTIONAL_FILTER.value:
+            # DIRECTIONAL_FILTER doesn't block - it routes
+            # For now, we'll pass it through and let routing logic handle it
+            return True
+        
+        # CERBERUS: Complex synchronization logic for parent-child sets
+        # This is typically evaluated at Omega, not during checkout
+        # For now, we'll pass it through as it has special handling requirements
+        elif guard_type == GuardianType.CERBERUS.value:
+            # CERBERUS requires special handling for parent-child synchronization
+            # It's not evaluated during checkout but at Omega reconciliation
+            return True
+        
+        # Unknown guard type
+        else:
+            raise ValueError(f"Unknown guard type: {guard_type}")
+
     def checkout_work(
         self,
         actor_id: uuid.UUID,
@@ -375,62 +562,151 @@ class ChameleonEngine:
                 # Extract the interaction IDs that feed this role
                 inbound_interaction_ids = [comp.interaction_id for comp in inbound_components]
                 
-                # Step 3: Find PENDING UOWs in these interactions
-                # Using PENDING as equivalent to the spec's queue state
-                candidate_uow = session.query(UnitsOfWork).filter(
+                # Step 3: Find ALL PENDING UOWs in these interactions
+                # We need to iterate through candidates to evaluate guards
+                candidate_uows = session.query(UnitsOfWork).filter(
                     and_(
                         UnitsOfWork.current_interaction_id.in_(inbound_interaction_ids),
                         UnitsOfWork.status == UOWStatus.PENDING.value
                     )
-                ).first()
+                ).all()
                 
-                if not candidate_uow:
+                if not candidate_uows:
                     # No work available
                     return None
                 
-                # Step 4: Execute Transactional Lock
-                # Transition PENDING → IN_PROGRESS (using ACTIVE status)
-                candidate_uow.status = UOWStatus.ACTIVE.value
-                candidate_uow.last_heartbeat = datetime.now(timezone.utc)
-                # Note: locked_by and locked_at fields need to be added to the model
-                # For now, we're using status change and last_heartbeat as the lock mechanism
+                # Step 4: Evaluate guards for each candidate
+                for candidate_uow in candidate_uows:
+                    # Find the component connecting this interaction to the role
+                    component = None
+                    for comp in inbound_components:
+                        if comp.interaction_id == candidate_uow.current_interaction_id:
+                            component = comp
+                            break
+                    
+                    if not component:
+                        # Should not happen, but skip if no component found
+                        continue
+                    
+                    # Find the guard associated with this component
+                    guard = session.query(Local_Guardians).filter(
+                        Local_Guardians.component_id == component.component_id
+                    ).first()
+                    
+                    # Retrieve UOW attributes for guard evaluation
+                    uow_attributes_raw = session.query(UOW_Attributes).filter(
+                        UOW_Attributes.uow_id == candidate_uow.uow_id
+                    ).all()
+                    
+                    # Build attributes dictionary from the latest version of each key
+                    attributes_dict = {}
+                    for attr in uow_attributes_raw:
+                        # If multiple versions exist, we want the latest
+                        if attr.key not in attributes_dict or attr.version > attributes_dict[attr.key]['version']:
+                            attributes_dict[attr.key] = {
+                                'value': attr.value,
+                                'version': attr.version
+                            }
+                    
+                    # Simplify to just key-value pairs
+                    uow_attributes = {key: data['value'] for key, data in attributes_dict.items()}
+                    
+                    # Evaluate guard (if one exists)
+                    guard_passed = True
+                    if guard:
+                        try:
+                            guard_passed = self._evaluate_guard(
+                                guard,
+                                candidate_uow,
+                                uow_attributes,
+                                session
+                            )
+                        except Exception as e:
+                            # Guard evaluation error - treat as rejection
+                            guard_passed = False
+                            # Log the error for debugging
+                            print(f"Guard evaluation error for UOW {candidate_uow.uow_id}: {e}")
+                    
+                    if not guard_passed:
+                        # Guard rejected the UOW - route to Ate Path (Epsilon)
+                        # Find the Epsilon role
+                        epsilon_role = session.query(Local_Roles).filter(
+                            and_(
+                                Local_Roles.local_workflow_id == candidate_uow.local_workflow_id,
+                                Local_Roles.role_type == RoleType.EPSILON.value
+                            )
+                        ).first()
+                        
+                        if epsilon_role:
+                            # Find the INBOUND component for Epsilon role (the Ate interaction)
+                            ate_component = session.query(Local_Components).filter(
+                                and_(
+                                    Local_Components.role_id == epsilon_role.role_id,
+                                    Local_Components.direction == ComponentDirection.INBOUND.value
+                                )
+                            ).first()
+                            
+                            if ate_component:
+                                # Route UOW to Ate interaction
+                                candidate_uow.status = UOWStatus.FAILED.value
+                                candidate_uow.current_interaction_id = ate_component.interaction_id
+                                
+                                # Log the guard rejection in UOW attributes
+                                timestamp = datetime.now(timezone.utc)
+                                error_attr = UOW_Attributes(
+                                    attribute_id=uuid.uuid4(),
+                                    uow_id=candidate_uow.uow_id,
+                                    instance_id=candidate_uow.instance_id,
+                                    key="_guard_rejection",
+                                    value={
+                                        "error_code": "GUARD_REJECTION",
+                                        "details": f"Criteria failed for guard: {guard.name if guard else 'unknown'}",
+                                        "timestamp": timestamp.isoformat(),
+                                        "actor_id": str(SYSTEM_ACTOR_ID),
+                                        "guard_name": guard.name if guard else None,
+                                        "guard_type": guard.type if guard else None
+                                    },
+                                    version=1,
+                                    actor_id=SYSTEM_ACTOR_ID,
+                                    reasoning="Guard criteria not met"
+                                )
+                                session.add(error_attr)
+                                session.flush()
+                        
+                        # Continue to next candidate
+                        continue
+                    
+                    # Guard passed (or no guard) - this UOW is valid
+                    # Step 5: Execute Transactional Lock
+                    # Transition PENDING → IN_PROGRESS (using ACTIVE status)
+                    candidate_uow.status = UOWStatus.ACTIVE.value
+                    candidate_uow.last_heartbeat = datetime.now(timezone.utc)
+                    # Note: locked_by and locked_at fields need to be added to the model
+                    # For now, we're using status change and last_heartbeat as the lock mechanism
+                    
+                    session.flush()
+                    
+                    # TODO: Interaction logging disabled due to SQLite BigInteger autoincrement issue
+                    # This needs to be addressed in the schema for production use
+                    # Log the interaction
+                    # log_entry = Interaction_Logs(
+                    #     instance_id=candidate_uow.instance_id,
+                    #     uow_id=candidate_uow.uow_id,
+                    #     actor_id=actor_id,
+                    #     role_id=role_id,
+                    #     interaction_id=candidate_uow.current_interaction_id,
+                    #     timestamp=datetime.now(timezone.utc)
+                    # )
+                    # session.add(log_entry)
+                    
+                    session.commit()
+                    
+                    return (candidate_uow.uow_id, uow_attributes)
                 
-                session.flush()
-                
-                # Step 5: Retrieve the UOW attributes
-                uow_attributes = session.query(UOW_Attributes).filter(
-                    UOW_Attributes.uow_id == candidate_uow.uow_id
-                ).all()
-                
-                # Build attributes dictionary from the latest version of each key
-                attributes_dict = {}
-                for attr in uow_attributes:
-                    # If multiple versions exist, we want the latest
-                    if attr.key not in attributes_dict or attr.version > attributes_dict[attr.key]['version']:
-                        attributes_dict[attr.key] = {
-                            'value': attr.value,
-                            'version': attr.version
-                        }
-                
-                # Simplify to just key-value pairs
-                result_attributes = {key: data['value'] for key, data in attributes_dict.items()}
-                
-                # TODO: Interaction logging disabled due to SQLite BigInteger autoincrement issue
-                # This needs to be addressed in the schema for production use
-                # Log the interaction
-                # log_entry = Interaction_Logs(
-                #     instance_id=candidate_uow.instance_id,
-                #     uow_id=candidate_uow.uow_id,
-                #     actor_id=actor_id,
-                #     role_id=role_id,
-                #     interaction_id=candidate_uow.current_interaction_id,
-                #     timestamp=datetime.now(timezone.utc)
-                # )
-                # session.add(log_entry)
-                
+                # If we get here, all candidates were rejected by guards
+                # Commit the rejections and return None
                 session.commit()
-                
-                return (candidate_uow.uow_id, result_attributes)
+                return None
                 
             except Exception as e:
                 session.rollback()

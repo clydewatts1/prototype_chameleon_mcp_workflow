@@ -14,7 +14,7 @@ Features:
 
 Usage:
     streamlit run tools/workflow_monitor.py
-    
+
     Or with a custom database:
     streamlit run tools/workflow_monitor.py -- --db-url "sqlite:///path/to/instance.db"
 
@@ -46,7 +46,6 @@ from database.models_instance import (
     Local_Workflows,
     Local_Roles,
     Local_Interactions,
-    Local_Components,
     UnitsOfWork,
     Interaction_Logs,
 )
@@ -109,9 +108,7 @@ def get_all_instances(session: Session) -> List[Instance_Context]:
     return session.query(Instance_Context).all()
 
 
-def get_uow_metrics(
-    session: Session, instance_id: str
-) -> Dict[str, int]:
+def get_uow_metrics(session: Session, instance_id: str) -> Dict[str, int]:
     """Calculate key UOW metrics for the dashboard."""
     metrics = {
         "active": 0,
@@ -235,9 +232,7 @@ def get_queue_depths(session: Session, instance_id: str) -> List[Dict]:
     ]
 
 
-def get_recent_history(
-    session: Session, instance_id: str, limit: int = 50
-) -> List[Dict]:
+def get_recent_history(session: Session, instance_id: str, limit: int = 50) -> List[Dict]:
     """Get the most recent history log entries."""
     history = (
         session.query(
@@ -262,9 +257,7 @@ def get_recent_history(
     return [
         {
             "Log ID": row.log_id,
-            "Timestamp": row.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-            if row.timestamp
-            else "N/A",
+            "Timestamp": row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else "N/A",
             "UOW ID": str(row.uow_id)[:8] + "...",
             "Role": row.role_name,
             "Interaction": row.interaction_name,
@@ -275,7 +268,7 @@ def get_recent_history(
 
 def sanitize_node_id(name: str) -> str:
     """Sanitize a name for use as a Graphviz node ID."""
-    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
 
 def get_role_uow_counts(
@@ -289,11 +282,7 @@ def get_role_uow_counts(
     role_data = {}
 
     # Get all roles for the workflow
-    roles = (
-        session.query(Local_Roles)
-        .filter(Local_Roles.local_workflow_id == workflow_id)
-        .all()
-    )
+    roles = session.query(Local_Roles).filter(Local_Roles.local_workflow_id == workflow_id).all()
 
     for role in roles:
         # Initialize counts (all zeros for now)
@@ -353,7 +342,7 @@ def generate_workflow_graph(
 ) -> Optional[graphviz.Digraph]:
     """
     Generate a Graphviz graph of the workflow topology with dynamic coloring.
-    
+
     Dynamic Coloring Rules:
     - Roles with locked/active UOWs -> Blue
     - Interactions with Pending UOWs -> Yellow (show count in label)
@@ -589,8 +578,7 @@ def main():
             if workflows:
                 # Workflow selector for graph
                 workflow_options = {
-                    f"{wf.name} (v{wf.version})": str(wf.local_workflow_id)
-                    for wf in workflows
+                    f"{wf.name} (v{wf.version})": str(wf.local_workflow_id) for wf in workflows
                 }
 
                 selected_workflow_label = st.selectbox(
@@ -632,9 +620,7 @@ def main():
                 st.subheader("📦 Queue Depths")
                 queue_depths = get_queue_depths(session, selected_instance_id)
                 if queue_depths:
-                    st.dataframe(
-                        queue_depths, use_container_width=True, hide_index=True
-                    )
+                    st.dataframe(queue_depths, use_container_width=True, hide_index=True)
                 else:
                     st.info("No pending items in queues.")
 

@@ -36,6 +36,7 @@ from database.models_instance import (
     Local_Guardians,
     UnitsOfWork,
     UOW_Attributes,
+    Local_Role_Attributes,
 )
 from database.enums import (
     RoleType,
@@ -540,14 +541,89 @@ class ChameleonEngine:
         else:
             raise ValueError(f"Unknown guard type: {guard_type}")
 
+    def _build_memory_context(
+        self, session: Session, role_id: uuid.UUID, actor_id: uuid.UUID
+    ) -> Dict[str, Any]:
+        """
+        Build the memory context for an actor checking out work in a specific role.
+
+        Implements Memory & Learning Specs Section 5: Interface for Actors (The Access Pattern).
+        
+        This method:
+        1. Fetches Global Blueprints (context_type='GLOBAL') for the role
+        2. Fetches Personal Playbook (context_type='ACTOR', context_id=actor_id) for the role
+        3. Filters out toxic memories (is_toxic=True)
+        4. Merges them with Actor-specific keys overriding Global keys
+        5. Updates last_accessed_at timestamp for all fetched memories
+
+        Args:
+            session: Database session for queries
+            role_id: The role being assumed
+            actor_id: The actor checking out work
+
+        Returns:
+            Dictionary of merged memory context (key -> value)
+        """
+        # Step 1: Query Global Blueprints for this role
+        global_memories = (
+            session.query(Local_Role_Attributes)
+            .filter(
+                and_(
+                    Local_Role_Attributes.role_id == role_id,
+                    Local_Role_Attributes.context_type == "GLOBAL",
+                    Local_Role_Attributes.is_toxic.is_not(True),  # Filter out toxic memories
+                )
+            )
+            .all()
+        )
+
+        # Step 2: Query Personal Playbook for this actor + role
+        actor_id_str = str(actor_id)
+        personal_memories = (
+            session.query(Local_Role_Attributes)
+            .filter(
+                and_(
+                    Local_Role_Attributes.role_id == role_id,
+                    Local_Role_Attributes.context_type == "ACTOR",
+                    Local_Role_Attributes.context_id == actor_id_str,
+                    Local_Role_Attributes.is_toxic.is_not(True),  # Filter out toxic memories
+                )
+            )
+            .all()
+        )
+
+        # Step 3: Build merged context (Global first, then Actor overrides)
+        context = {}
+        
+        # Add Global Blueprints
+        for memory in global_memories:
+            context[memory.key] = memory.value
+
+        # Add/Override with Personal Playbook (Actor-specific overrides Global)
+        for memory in personal_memories:
+            context[memory.key] = memory.value
+
+        # Step 4: Update last_accessed_at timestamps for all fetched memories
+        now = datetime.now(timezone.utc)
+        all_memories = global_memories + personal_memories
+        
+        for memory in all_memories:
+            memory.last_accessed_at = now
+
+        # Commit timestamp updates
+        session.flush()
+
+        return context
+
     def checkout_work(
         self, actor_id: uuid.UUID, role_id: uuid.UUID
-    ) -> Optional[Tuple[uuid.UUID, Dict[str, Any]]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Acquire a Unit of Work from a specific Role's queue with transactional locking.
 
         Implements Interface & MCP Specs Section 1.1: Tool checkout_work
         Enforces UOW Lifecycle Specs Section 2.2: Valid Transition Matrix (PENDING → IN_PROGRESS)
+        Implements Memory & Learning Specs Section 5: Context injection during checkout
 
         LOCKING MECHANISM NOTE:
         The current implementation uses status (PENDING → ACTIVE) and last_heartbeat timestamp
@@ -562,14 +638,15 @@ class ChameleonEngine:
            - Select a candidate UOW
            - Update status to IN_PROGRESS (ACTIVE in current enum)
            - Set last_heartbeat = NOW (as lock timestamp)
-        4. Return the uow_id and its attributes
+        4. Build memory context for the actor + role
+        5. Return the uow_id, attributes, and context
 
         Args:
             actor_id: The Actor's unique identity
             role_id: The Role the Actor is assuming
 
         Returns:
-            Tuple of (uow_id, attributes dict) if work found, None if no work available
+            Dict with keys: 'uow_id', 'attributes', 'context' if work found, None if no work available
 
         Raises:
             ValueError: If role not found or invalid
@@ -761,9 +838,16 @@ class ChameleonEngine:
                     # )
                     # session.add(log_entry)
 
+                    # Step 6: Build memory context for this actor + role
+                    memory_context = self._build_memory_context(session, role_id, actor_id)
+
                     session.commit()
 
-                    return (candidate_uow.uow_id, uow_attributes)
+                    return {
+                        "uow_id": candidate_uow.uow_id,
+                        "attributes": uow_attributes,
+                        "context": memory_context,
+                    }
 
                 # If we get here, all candidates were rejected by guards
                 # Commit the rejections and return None

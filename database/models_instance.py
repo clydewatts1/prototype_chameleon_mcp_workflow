@@ -527,6 +527,7 @@ class Local_Actor_Role_Assignments(InstanceBase):
 class Local_Role_Attributes(InstanceBase):
     """
     The persistent knowledge base (Article III). Stores both shared Blueprints and private Playbooks.
+    Memory & Learning Specs: Section 4 (Schema) and Section 5 (Access).
     """
     __tablename__ = "local_role_attributes"
     __table_args__ = {
@@ -551,6 +552,16 @@ class Local_Role_Attributes(InstanceBase):
         nullable=False,
         comment="The Role context this memory applies to."
     )
+    context_type = Column(
+        String(20),
+        nullable=False,
+        comment="Context discriminator: 'GLOBAL' for shared blueprints, 'ACTOR' for personal playbooks."
+    )
+    context_id = Column(
+        String(255),
+        nullable=False,
+        comment="Context identifier: 'GLOBAL' for blueprints, or Actor UUID string representation (with hyphens) for personal playbooks."
+    )
     actor_id = Column(
         UUID(),
         ForeignKey("local_actors.actor_id", ondelete="SET NULL"),
@@ -566,11 +577,23 @@ class Local_Role_Attributes(InstanceBase):
         JSON,
         comment="The stored knowledge/configuration."
     )
+    confidence_score = Column(
+        Integer,
+        default=50,
+        nullable=False,
+        comment="Confidence level (0-100) for this memory attribute."
+    )
     is_toxic = Column(
         Boolean,
         default=False,
         nullable=False,
         comment="Flagged by Omega/Epsilon if this memory led to failure (Article XX)."
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        comment="When this memory was created."
     )
     last_accessed_at = Column(
         DateTime(timezone=True),

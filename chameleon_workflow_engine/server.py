@@ -123,6 +123,7 @@ class CheckoutWorkResponse(BaseModel):
 
     uow_id: str
     attributes: Dict[str, Any]
+    context: Dict[str, Any]
 
 
 class SubmitWorkRequest(BaseModel):
@@ -509,13 +510,18 @@ async def checkout_work(request: CheckoutWorkRequest, response: Response):
             response.status_code = 204
             return Response(status_code=204)
 
-        uow_id, attributes = result
+        # Extract components from the result dict
+        uow_id = result["uow_id"]
+        attributes = result["attributes"]
+        context = result["context"]
 
         logger.info(
             f"Work checked out: uow_id={uow_id}, actor_id={actor_uuid}, role_id={role_uuid}"
         )
 
-        return CheckoutWorkResponse(uow_id=str(uow_id), attributes=attributes)
+        return CheckoutWorkResponse(
+            uow_id=str(uow_id), attributes=attributes, context=context
+        )
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -21,7 +21,6 @@ import time
 import uuid
 import requests
 from typing import Dict, Any, Optional
-import json
 
 
 class AIAgent:
@@ -56,7 +55,7 @@ class AIAgent:
         self.work_count = 0
         self.ollama_available = True
 
-        print(f"🤖 AI Agent initialized")
+        print("🤖 AI Agent initialized")
         print(f"   Server: {self.base_url}")
         print(f"   Ollama: {self.ollama_url}")
         print(f"   Model: {self.model}")
@@ -98,7 +97,7 @@ class AIAgent:
             print("   Make sure Ollama is running: https://ollama.ai")
             self.ollama_available = False
         except requests.exceptions.Timeout:
-            print(f"⚠️  Timeout connecting to Ollama")
+            print("⚠️  Timeout connecting to Ollama")
             self.ollama_available = False
         except Exception as e:
             print(f"⚠️  Error checking Ollama: {e}")
@@ -420,7 +419,7 @@ Summary:"""
         Main agent loop: poll for work, analyze text with AI, and submit results.
         """
         print("🚀 AI Agent started. Polling for work...")
-        print(f"   Press Ctrl+C to stop")
+        print("   Press Ctrl+C to stop")
         print()
 
         if not self.ollama_available:
@@ -450,13 +449,15 @@ Summary:"""
 
                     # Show waiting message every 10 empty polls
                     if consecutive_empty_polls % 10 == 1:
-                        print(f"⏳ Waiting for work... ({consecutive_empty_polls} empty polls, {self.work_count} processed)")
+                        print(
+                            f"⏳ Waiting for work... ({consecutive_empty_polls} empty polls, {self.work_count} processed)"
+                        )
 
                     # Wait before polling again
                     time.sleep(self.poll_interval)
 
         except KeyboardInterrupt:
-            print(f"\n\n👋 AI Agent stopped by user")
+            print("\n\n👋 AI Agent stopped by user")
             print(f"   Total work items processed: {self.work_count}")
             sys.exit(0)
 
@@ -550,7 +551,9 @@ Examples:
         print("   You must provide the AI_Analyzer role UUID for the agent to work")
         print()
         print("   To find the role ID:")
-        print("   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml")
+        print(
+            "   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml"
+        )
         print("   2. Query the database for the AI_Analyzer role UUID")
         print()
         sys.exit(1)

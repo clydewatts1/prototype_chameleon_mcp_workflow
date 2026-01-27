@@ -17,7 +17,6 @@ import time
 import uuid
 import requests
 from typing import Dict, Any, Optional
-import json
 
 
 class AutoAgent:
@@ -48,7 +47,7 @@ class AutoAgent:
         self.processing_delay = processing_delay
         self.work_count = 0
 
-        print(f"🤖 Auto Agent initialized")
+        print("🤖 Auto Agent initialized")
         print(f"   Server: {self.base_url}")
         print(f"   Actor ID: {self.actor_id}")
         if self.role_id:
@@ -184,7 +183,9 @@ class AutoAgent:
 
         # Bonus for important keywords
         important_keywords = ["important", "critical", "urgent", "priority", "essential"]
-        keyword_count = sum(1 for keyword in important_keywords if keyword.lower() in ai_summary.lower())
+        keyword_count = sum(
+            1 for keyword in important_keywords if keyword.lower() in ai_summary.lower()
+        )
         bonus = keyword_count * 50
 
         # Penalty for very short summaries
@@ -274,7 +275,7 @@ class AutoAgent:
         Main agent loop: poll for work, calculate scores, and submit results.
         """
         print("🚀 Auto Agent started. Polling for work...")
-        print(f"   Press Ctrl+C to stop")
+        print("   Press Ctrl+C to stop")
         print()
 
         consecutive_empty_polls = 0
@@ -299,13 +300,15 @@ class AutoAgent:
 
                     # Show waiting message every 10 empty polls
                     if consecutive_empty_polls % 10 == 1:
-                        print(f"⏳ Waiting for work... ({consecutive_empty_polls} empty polls, {self.work_count} processed)")
+                        print(
+                            f"⏳ Waiting for work... ({consecutive_empty_polls} empty polls, {self.work_count} processed)"
+                        )
 
                     # Wait before polling again
                     time.sleep(self.poll_interval)
 
         except KeyboardInterrupt:
-            print(f"\n\n👋 Auto Agent stopped by user")
+            print("\n\n👋 Auto Agent stopped by user")
             print(f"   Total work items processed: {self.work_count}")
             sys.exit(0)
 
@@ -392,7 +395,9 @@ Examples:
         print("   You must provide the Auto_Calculator role UUID for the agent to work")
         print()
         print("   To find the role ID:")
-        print("   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml")
+        print(
+            "   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml"
+        )
         print("   2. Query the database for the Auto_Calculator role UUID")
         print()
         sys.exit(1)

@@ -44,7 +44,7 @@ class HumanAgent:
         self.actor_id = actor_id or str(uuid.uuid4())
         self.poll_interval = poll_interval
 
-        print(f"🤖 Human Agent initialized")
+        print("🤖 Human Agent initialized")
         print(f"   Server: {self.base_url}")
         print(f"   Actor ID: {self.actor_id}")
         if self.role_id:
@@ -227,7 +227,11 @@ class HumanAgent:
                 reasoning = input().strip()
 
                 while not reasoning:
-                    print("⚠️  Rejection reason is required. Please provide a reason: ", end="", flush=True)
+                    print(
+                        "⚠️  Rejection reason is required. Please provide a reason: ",
+                        end="",
+                        flush=True,
+                    )
                     reasoning = input().strip()
 
                 return {
@@ -243,7 +247,7 @@ class HumanAgent:
         Main agent loop: poll for work, prompt user, and submit results.
         """
         print("🚀 Human Agent started. Polling for work...")
-        print(f"   Press Ctrl+C to stop")
+        print("   Press Ctrl+C to stop")
         print()
 
         consecutive_empty_polls = 0
@@ -264,7 +268,9 @@ class HumanAgent:
                     decision = self.prompt_approval(work)
 
                     # Extract reasoning if present
-                    reasoning = decision.get("approval_reasoning") or decision.get("rejection_reasoning")
+                    reasoning = decision.get("approval_reasoning") or decision.get(
+                        "rejection_reasoning"
+                    )
 
                     # Submit the work
                     success = self.submit_work(
@@ -371,7 +377,9 @@ Examples:
         print("   You must provide the Human_Approver role UUID for the agent to work")
         print()
         print("   To find the role ID:")
-        print("   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml")
+        print(
+            "   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml"
+        )
         print("   2. Query the database for the Human_Approver role UUID")
         print()
         sys.exit(1)

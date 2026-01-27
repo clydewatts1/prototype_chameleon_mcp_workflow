@@ -158,6 +158,48 @@ class ReportFailureResponse(BaseModel):
     message: str
 
 
+class RunZombieProtocolRequest(BaseModel):
+    """Model for running zombie protocol"""
+
+    timeout_seconds: Optional[int] = 300
+
+
+class RunZombieProtocolResponse(BaseModel):
+    """Model for zombie protocol response"""
+
+    success: bool
+    zombies_reclaimed: int
+    message: str
+
+
+class RunMemoryDecayRequest(BaseModel):
+    """Model for running memory decay"""
+
+    retention_days: Optional[int] = 90
+
+
+class RunMemoryDecayResponse(BaseModel):
+    """Model for memory decay response"""
+
+    success: bool
+    memories_deleted: int
+    message: str
+
+
+class MarkMemoryToxicRequest(BaseModel):
+    """Model for marking memory as toxic"""
+
+    memory_id: str
+    reason: str
+
+
+class MarkMemoryToxicResponse(BaseModel):
+    """Model for mark memory toxic response"""
+
+    success: bool
+    message: str
+
+
 # In-memory storage (replace with database in production)
 workflows: Dict[str, dict] = {}
 
@@ -627,6 +669,161 @@ async def report_failure(request: ReportFailureRequest):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         logger.error(f"Error reporting failure: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# Admin Endpoints for Background Services
+
+
+@app.post("/admin/run-zombie-protocol", response_model=RunZombieProtocolResponse)
+async def run_zombie_protocol_endpoint(
+    request: RunZombieProtocolRequest, db: Session = Depends(get_db_session)
+):
+    """
+    Manually trigger the Zombie Actor Protocol (Article XI.3).
+
+    This endpoint executes the Tau Role's zombie detection and reclamation logic,
+    identifying UOWs that have been locked (ACTIVE) for longer than the timeout
+    threshold and resetting/failing them.
+
+    Useful for:
+    - Manual testing of the zombie protocol
+    - Triggering cleanup on-demand
+    - Integration with external cron jobs
+
+    Args:
+        request: Contains optional timeout_seconds (default: 300)
+        db: Database session (injected)
+
+    Returns:
+        RunZombieProtocolResponse with count of zombies reclaimed
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+
+        # Create engine
+        engine = ChameleonEngine(db_manager)
+
+        # Run zombie protocol
+        zombies_reclaimed = engine.run_zombie_protocol(
+            session=db, timeout_seconds=request.timeout_seconds or 300
+        )
+
+        logger.info(
+            f"Zombie Protocol executed: {zombies_reclaimed} zombie(s) reclaimed "
+            f"(timeout: {request.timeout_seconds or 300}s)"
+        )
+
+        return RunZombieProtocolResponse(
+            success=True,
+            zombies_reclaimed=zombies_reclaimed,
+            message=f"Zombie protocol completed. Reclaimed {zombies_reclaimed} zombie token(s).",
+        )
+
+    except Exception as e:
+        logger.error(f"Error running zombie protocol: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/admin/run-memory-decay", response_model=RunMemoryDecayResponse)
+async def run_memory_decay_endpoint(
+    request: RunMemoryDecayRequest, db: Session = Depends(get_db_session)
+):
+    """
+    Manually trigger Memory Decay / The Janitor (Article XX.3).
+
+    This endpoint executes the memory cleanup logic, removing old/stale memory
+    entries that haven't been accessed for longer than the retention period.
+
+    Useful for:
+    - Manual testing of the memory decay logic
+    - Triggering cleanup on-demand
+    - Integration with external cron jobs
+
+    Args:
+        request: Contains optional retention_days (default: 90)
+        db: Database session (injected)
+
+    Returns:
+        RunMemoryDecayResponse with count of memories deleted
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+
+        # Create engine
+        engine = ChameleonEngine(db_manager)
+
+        # Run memory decay
+        memories_deleted = engine.run_memory_decay(
+            session=db, retention_days=request.retention_days or 90
+        )
+
+        logger.info(
+            f"Memory Decay executed: {memories_deleted} memory entries deleted "
+            f"(retention: {request.retention_days or 90} days)"
+        )
+
+        return RunMemoryDecayResponse(
+            success=True,
+            memories_deleted=memories_deleted,
+            message=f"Memory decay completed. Deleted {memories_deleted} stale memory entries.",
+        )
+
+    except Exception as e:
+        logger.error(f"Error running memory decay: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/admin/mark-toxic", response_model=MarkMemoryToxicResponse)
+async def mark_memory_toxic_endpoint(request: MarkMemoryToxicRequest):
+    """
+    Mark a specific memory as "Toxic" (Article XX.1 - The Toxic Knowledge Filter).
+
+    This endpoint flags a memory entry so it is excluded during execution. Used when:
+    - A UOW reaches FAILED status and requires Epsilon remediation
+    - An Admin identifies a memory that led to incorrect results
+    - Post-mortem analysis reveals problematic learned patterns
+
+    Toxic memories are automatically excluded from context during work checkout
+    (see the _build_memory_context method in the engine).
+
+    Args:
+        request: Contains memory_id and reason for marking toxic
+
+    Returns:
+        MarkMemoryToxicResponse with success status
+    """
+    try:
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+
+        # Parse memory_id to UUID
+        try:
+            memory_uuid = uuid.UUID(request.memory_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid memory_id format")
+
+        # Create engine
+        engine = ChameleonEngine(db_manager)
+
+        # Mark memory as toxic
+        engine.mark_memory_toxic(memory_id=memory_uuid, reason=request.reason)
+
+        logger.info(f"Memory {memory_uuid} marked as toxic. Reason: {request.reason}")
+
+        return MarkMemoryToxicResponse(
+            success=True,
+            message=f"Memory {memory_uuid} successfully marked as toxic.",
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error marking memory as toxic: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

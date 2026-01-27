@@ -90,4 +90,13 @@ python tools/workflow_manager.py -w "WorkflowName" --graph  # Export DOT graph
 
 ---
 
+## Additional Documentation 📚
+
+For module-specific guidance:
+- **Server.py**: See [chameleon_workflow_engine/SERVER_PROMPT.md](../chameleon_workflow_engine/SERVER_PROMPT.md) for detailed guidance on the FastAPI workflow engine server, including architecture, conventions, testing, and common pitfalls.
+- **Database**: See [database/README.md](../database/README.md) for air-gapped architecture, Tier 1/Tier 2 isolation, and usage examples.
+- **Configuration**: See [common/README.md](../common/README.md) for environment variable management.
+
+---
+
 If any part of this guidance is unclear or missing examples you'd like automated, tell me which area (schema, YAML, CLI, server) and I'll add or expand the instructions. ✍️

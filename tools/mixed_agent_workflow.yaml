@@ -56,10 +56,10 @@ roles:
 
   - name: "Timeout_Manager"
     role_type: "TAU"
-    description: "Manages timeouts and escalations"
+    description: "Manages timeouts (automated background role)"
     ai_context:
-      persona: "You are a deadline enforcer"
-      instructions: "Escalate work items that exceed time limits"
+      persona: "You are an automated deadline enforcer"
+      instructions: "Monitor and escalate work items that exceed time limits"
 
 interactions:
   - name: "Initial_Queue"
@@ -82,25 +82,15 @@ interactions:
     ai_context:
       purpose: "Holds scored UOWs ready for human review"
 
-  - name: "Archive_Queue"
-    description: "Queue for approved UOWs awaiting archival"
-    ai_context:
-      purpose: "Holds approved UOWs ready for final archival"
-
   - name: "Error_Queue"
     description: "Queue for UOWs with errors"
     ai_context:
       purpose: "Holds UOWs that failed processing"
 
   - name: "Timeout_Queue"
-    description: "Queue for timed-out UOWs"
+    description: "Queue for timed-out UOWs (managed by TAU role)"
     ai_context:
       purpose: "Holds UOWs that exceeded processing time limits"
-
-  - name: "Completed_Queue"
-    description: "Final queue for archived workflows"
-    ai_context:
-      purpose: "Final destination for successfully completed workflows"
 
 components:
   # Alpha (Initiator) outbound to Initial Queue
@@ -166,23 +156,14 @@ components:
     ai_context:
       data_flow: "UOW with human approval decision"
 
-  # Archiver inbound from Approval Queue
+  # Archiver inbound from Approval Queue (Omega role processes and finalizes)
   - name: "Archiver_From_Approval"
     role_name: "Archiver"
     interaction_name: "Approval_Queue"
     direction: "INBOUND"
-    description: "Archiver pulls approved UOWs"
+    description: "Archiver pulls approved UOWs and finalizes them"
     ai_context:
-      data_flow: "Retrieve approved UOW for archival"
-
-  # Archiver outbound to Completed Queue
-  - name: "Archiver_To_Complete"
-    role_name: "Archiver"
-    interaction_name: "Completed_Queue"
-    direction: "OUTBOUND"
-    description: "Send archived UOWs to Completed Queue"
-    ai_context:
-      data_flow: "Fully processed and archived UOW"
+      data_flow: "Retrieve approved UOW for final archival and completion"
 
   # Error Handler components
   - name: "AI_To_Error"
@@ -225,14 +206,14 @@ components:
     ai_context:
       data_flow: "Remediated UOW ready for reprocessing"
 
-  # Timeout Manager components
+  # Timeout Manager components (TAU role - automated background)
   - name: "Timeout_From_Queue"
     role_name: "Timeout_Manager"
     interaction_name: "Timeout_Queue"
     direction: "INBOUND"
-    description: "Timeout manager pulls stale UOWs"
+    description: "Timeout manager monitors stale UOWs"
     ai_context:
-      data_flow: "Retrieve timed-out UOWs"
+      data_flow: "Automated monitoring of timed-out UOWs"
 
   - name: "Timeout_To_Error"
     role_name: "Timeout_Manager"
@@ -241,6 +222,15 @@ components:
     description: "Route timed-out UOWs to error handler"
     ai_context:
       data_flow: "Escalated UOW requiring attention"
+
+  # TAU produces to Timeout Queue by detecting stale UOWs
+  - name: "Timeout_Monitor"
+    role_name: "Timeout_Manager"
+    interaction_name: "Timeout_Queue"
+    direction: "OUTBOUND"
+    description: "TAU role places detected timeout UOWs into queue"
+    ai_context:
+      data_flow: "UOWs that exceeded time thresholds"
 
 guardians:
   # Pass-through guards for the main pipeline
@@ -302,12 +292,13 @@ guardians:
 
   - name: "Archiver_Inbound_Guard"
     component_name: "Archiver_From_Approval"
-    type: "PASS_THRU"
-    description: "Allows approved UOWs to Archiver"
+    type: "CERBERUS"
+    description: "Ensures all processing complete before archival"
     config:
-      validation: "basic"
+      wait_for_children: false
+      sync_strategy: "simple"
     ai_context:
-      logic: "Simple pass-through for archival"
+      logic: "CERBERUS guard for Omega role - ensures workflow completeness"
 
   - name: "Error_Routing_Guard"
     component_name: "Error_From_Queue"

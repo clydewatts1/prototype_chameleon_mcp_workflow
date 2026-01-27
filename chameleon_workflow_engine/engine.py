@@ -13,7 +13,7 @@ References:
 
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Tuple
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -1338,8 +1338,6 @@ class ChameleonEngine:
             RuntimeError: If zombie protocol execution fails
         """
         try:
-            from datetime import timedelta
-
             # Calculate the zombie threshold
             zombie_threshold = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
 
@@ -1448,8 +1446,6 @@ class ChameleonEngine:
             RuntimeError: If memory decay execution fails
         """
         try:
-            from datetime import timedelta
-
             # Calculate the decay threshold
             decay_threshold = datetime.now(timezone.utc) - timedelta(days=retention_days)
 

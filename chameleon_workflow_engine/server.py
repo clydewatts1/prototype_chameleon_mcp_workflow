@@ -809,12 +809,12 @@ async def mark_memory_toxic_endpoint(request: MarkMemoryToxicRequest):
         engine = ChameleonEngine(db_manager)
 
         # Mark memory as toxic
-        success = engine.mark_memory_toxic(memory_id=memory_uuid, reason=request.reason)
+        engine.mark_memory_toxic(memory_id=memory_uuid, reason=request.reason)
 
         logger.info(f"Memory {memory_uuid} marked as toxic. Reason: {request.reason}")
 
         return MarkMemoryToxicResponse(
-            success=success,
+            success=True,
             message=f"Memory {memory_uuid} successfully marked as toxic.",
         )
 

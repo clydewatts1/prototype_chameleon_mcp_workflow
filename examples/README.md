@@ -26,6 +26,24 @@ The example agents work with the `mixed_agent_workflow.yaml` workflow, which cha
 
 ## Quick Start
 
+### Using the Setup Helper (Recommended)
+
+The easiest way to get started is using the setup helper script:
+
+```bash
+# 1. Import the workflow
+python tools/workflow_manager.py -i -f tools/mixed_agent_workflow.yaml
+
+# 2. Run the setup helper to get role IDs and instructions
+python examples/setup_demo.py
+```
+
+The setup helper will display the exact commands you need to run the agents with the correct role IDs.
+
+### Manual Setup
+
+If you prefer to set up manually, follow these steps:
+
 ### 1. Import the Workflow
 
 First, import the mixed agent workflow into the database:

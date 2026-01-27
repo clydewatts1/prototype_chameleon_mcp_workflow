@@ -1,44 +1,41 @@
 #!/usr/bin/env python3
 """
-Workflow Monitor Dashboard - Real-time Control Room for the Chameleon Workflow Engine
+Workflow Monitor CLI - Interactive Command-Line Control Room for the Chameleon Workflow Engine
 
-This Streamlit application provides a "Control Room" view of the Chameleon Workflow Engine,
-allowing operators to monitor workflow instances, track UOW (Units of Work) status,
-visualize workflow topology with real-time state coloring, and inspect execution history.
+This script provides an interactive text-based menu system for monitoring workflow instances,
+tracking UOW (Units of Work) status, and inspecting roles and interactions.
 
 Features:
-- Real-time metrics dashboard showing active, completed, failed, and zombie UOWs
-- Interactive workflow topology visualization with dynamic state-based coloring
-- Detailed data tables for active work, queue depths, and execution history
-- Configurable database connection and auto-refresh capabilities
+- Interactive menu loop with multiple monitoring options
+- Monitor Global Status: Real-time metrics dashboard
+- Inspect Roles: View all roles with their work counts
+- Inspect Interactions: View all interactions with their work counts
+- Configurable database connection
 
 Usage:
-    streamlit run tools/workflow_monitor.py
+    python tools/workflow_monitor.py [--db-url <url>]
 
-    Or with a custom database:
-    streamlit run tools/workflow_monitor.py -- --db-url "sqlite:///path/to/instance.db"
+    Examples:
+    python tools/workflow_monitor.py
+    python tools/workflow_monitor.py --db-url "sqlite:///path/to/instance.db"
 
 Source of Truth:
     - database/manager.py and database/models_instance.py (State queries)
     - database/enums.py (Status and Role Type definitions)
-    - chameleon_workflow_engine/server.py (API structure reference)
 """
 
 import sys
+import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import argparse
-import re
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-import graphviz
 
 from database.manager import DatabaseManager
 from database.models_instance import (
@@ -46,68 +43,53 @@ from database.models_instance import (
     Local_Workflows,
     Local_Roles,
     Local_Interactions,
+    Local_Components,
     UnitsOfWork,
-    Interaction_Logs,
 )
-from database.enums import UOWStatus, RoleType, ComponentDirection
+from database.enums import UOWStatus, ComponentDirection
 
-# Page configuration
-st.set_page_config(
-    page_title="Chameleon Workflow Monitor",
-    page_icon="🦎",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Try to import tabulate for nice table formatting
+try:
+    from tabulate import tabulate
 
-# Custom CSS for better styling
-st.markdown(
-    """
-    <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: bold;
-    }
-    .metric-label {
-        font-size: 1rem;
-        color: #666;
-    }
-    .critical {
-        color: #ff4b4b;
-    }
-    .warning {
-        color: #ffa500;
-    }
-    .success {
-        color: #00c851;
-    }
-    .info {
-        color: #33b5e5;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+    TABULATE_AVAILABLE = True
+except ImportError:
+    TABULATE_AVAILABLE = False
 
 
-def get_db_manager(db_url: str) -> DatabaseManager:
-    """Initialize database manager with caching and ensure schema exists."""
-    if "db_manager" not in st.session_state or st.session_state.get("db_url") != db_url:
-        manager = DatabaseManager(instance_url=db_url)
-        # Ensure the schema exists
-        try:
-            manager.create_instance_schema()
-        except Exception:
-            # Schema already exists, that's fine
-            pass
-        st.session_state.db_manager = manager
-        st.session_state.db_url = db_url
-    return st.session_state.db_manager
+def clear_screen():
+    """Clear the terminal screen."""
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def print_header(title: str):
+    """Print a formatted header."""
+    print("\n" + "=" * 80)
+    print(f"  {title}")
+    print("=" * 80 + "\n")
+
+
+def print_table(headers: List[str], rows: List[List], tablefmt: str = "grid"):
+    """Print a formatted table using tabulate or fallback to manual formatting."""
+    if TABULATE_AVAILABLE:
+        print(tabulate(rows, headers=headers, tablefmt=tablefmt))
+    else:
+        # Fallback to simple formatting
+        # Calculate column widths
+        col_widths = [len(h) for h in headers]
+        for row in rows:
+            for i, cell in enumerate(row):
+                col_widths[i] = max(col_widths[i], len(str(cell)))
+
+        # Print header
+        header_line = " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers))
+        print(header_line)
+        print("-" * len(header_line))
+
+        # Print rows
+        for row in rows:
+            row_line = " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row))
+            print(row_line)
 
 
 def get_all_instances(session: Session) -> List[Instance_Context]:
@@ -115,8 +97,64 @@ def get_all_instances(session: Session) -> List[Instance_Context]:
     return session.query(Instance_Context).all()
 
 
-def get_uow_metrics(session: Session, instance_id: str) -> Dict[str, int]:
-    """Calculate key UOW metrics for the dashboard."""
+def select_instance(session: Session) -> Optional[str]:
+    """Prompt user to select an instance and return the instance_id."""
+    instances = get_all_instances(session)
+
+    if not instances:
+        print("\n⚠️  No workflow instances found in the database.")
+        print("Please create an instance first using the workflow instantiation API.")
+        return None
+
+    print("\nAvailable Workflow Instances:")
+    print("-" * 80)
+    for i, inst in enumerate(instances, 1):
+        deployed = (
+            inst.deployment_date.strftime("%Y-%m-%d %H:%M") if inst.deployment_date else "N/A"
+        )
+        print(f"{i}. {inst.name} (Status: {inst.status}, Deployed: {deployed})")
+        print(f"   ID: {str(inst.instance_id)[:8]}...")
+
+    while True:
+        try:
+            choice = input("\nSelect instance number (or 'q' to quit): ").strip()
+            if choice.lower() == "q":
+                return None
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(instances):
+                return str(instances[idx].instance_id)
+            else:
+                print("Invalid selection. Please try again.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+        except (KeyboardInterrupt, EOFError):
+            print("\n")
+            return None
+
+
+def monitor_global_status(session: Session, instance_id: str):
+    """Display global status metrics for the instance."""
+    clear_screen()
+    print_header("🦎 Monitor Global Status")
+
+    # Get instance details
+    instance = (
+        session.query(Instance_Context).filter(Instance_Context.instance_id == instance_id).first()
+    )
+
+    if not instance:
+        print("❌ Instance not found.")
+        return
+
+    print(f"Instance: {instance.name}")
+    print(f"Status: {instance.status}")
+    print(
+        f"Deployed: {instance.deployment_date.strftime('%Y-%m-%d %H:%M:%S') if instance.deployment_date else 'N/A'}"
+    )
+    print(f"ID: {instance_id}\n")
+
+    # Calculate metrics
     metrics = {
         "active": 0,
         "pending": 0,
@@ -157,16 +195,20 @@ def get_uow_metrics(session: Session, instance_id: str) -> Dict[str, int]:
     )
     metrics["zombies"] = zombies or 0
 
-    return metrics
+    # Display metrics
+    print("📊 Key Metrics:")
+    print("-" * 80)
+    print(f"  🔄 Active UOWs:      {metrics['active']}")
+    print(f"  ⏳ Pending UOWs:     {metrics['pending']}")
+    print(f"  ✅ Completed UOWs:   {metrics['completed']}")
+    print(f"  ❌ Failed UOWs:      {metrics['failed']}")
+    print(f"  🧟 Zombie UOWs:      {metrics['zombies']} (stale heartbeat)")
+    print("-" * 80)
 
-
-def get_active_work(session: Session, instance_id: str) -> List[Dict]:
-    """Get all in-progress UOWs with their details."""
-    active_uows = (
+    # Additional details: Active work
+    active_work = (
         session.query(
             UnitsOfWork.uow_id,
-            UnitsOfWork.status,
-            UnitsOfWork.last_heartbeat,
             Local_Interactions.name.label("interaction_name"),
             Local_Workflows.name.label("workflow_name"),
         )
@@ -182,482 +224,218 @@ def get_active_work(session: Session, instance_id: str) -> List[Dict]:
             UnitsOfWork.instance_id == instance_id,
             UnitsOfWork.status == UOWStatus.ACTIVE.value,
         )
+        .limit(10)
         .all()
     )
 
-    result = []
-    now = datetime.now(timezone.utc)
-    for uow in active_uows:
-        duration = None
-        if uow.last_heartbeat:
-            duration = (now - uow.last_heartbeat).total_seconds()
-
-        result.append(
-            {
-                "UOW ID": str(uow.uow_id)[:8] + "...",
-                "Workflow": uow.workflow_name,
-                "Interaction": uow.interaction_name,
-                "Status": uow.status,
-                "Duration (sec)": int(duration) if duration else "N/A",
-            }
-        )
-
-    return result
+    if active_work:
+        print("\n🔨 Active Work (Top 10):")
+        headers = ["UOW ID", "Workflow", "Interaction"]
+        rows = [
+            [str(uow.uow_id)[:8] + "...", uow.workflow_name, uow.interaction_name]
+            for uow in active_work
+        ]
+        print_table(headers, rows)
 
 
-def get_queue_depths(session: Session, instance_id: str) -> List[Dict]:
-    """Get count of pending UOWs per interaction."""
-    queue_data = (
+def inspect_roles(session: Session, instance_id: str):
+    """Display all roles with their work counts."""
+    clear_screen()
+    print_header("👥 Inspect Roles")
+
+    # Query: Get all Local_Roles and count their inbound work using a single query
+    # Join path: Local_Roles -> Local_Components (INBOUND) -> Local_Interactions -> UnitsOfWork
+    # Using LEFT OUTER JOIN and GROUP BY to handle roles with zero work count
+
+    roles_with_counts = (
         session.query(
-            Local_Interactions.name.label("interaction_name"),
-            Local_Workflows.name.label("workflow_name"),
-            func.count(UnitsOfWork.uow_id).label("pending_count"),
+            Local_Roles.name,
+            Local_Roles.role_type,
+            Local_Roles.role_id,
+            func.count(UnitsOfWork.uow_id).label("work_count"),
         )
-        .join(
+        .join(Local_Workflows, Local_Roles.local_workflow_id == Local_Workflows.local_workflow_id)
+        .outerjoin(
+            Local_Components,
+            (Local_Components.role_id == Local_Roles.role_id)
+            & (Local_Components.direction == ComponentDirection.INBOUND.value),
+        )
+        .outerjoin(
+            Local_Interactions,
+            Local_Components.interaction_id == Local_Interactions.interaction_id,
+        )
+        .outerjoin(
             UnitsOfWork,
-            Local_Interactions.interaction_id == UnitsOfWork.current_interaction_id,
+            (UnitsOfWork.current_interaction_id == Local_Interactions.interaction_id)
+            & (UnitsOfWork.instance_id == instance_id)
+            & (UnitsOfWork.status == UOWStatus.PENDING.value),
+        )
+        .filter(Local_Workflows.instance_id == instance_id)
+        .group_by(Local_Roles.role_id, Local_Roles.name, Local_Roles.role_type)
+        .all()
+    )
+
+    if not roles_with_counts:
+        print("No roles found for this instance.")
+        return
+
+    # Prepare data for display
+    role_data = [
+        [role.name, role.role_type, str(role.role_id)[:8] + "...", role.work_count]
+        for role in roles_with_counts
+    ]
+
+    # Sort by work count descending
+    role_data.sort(key=lambda x: x[3], reverse=True)
+
+    print(f"\nTotal Roles: {len(role_data)}\n")
+
+    headers = ["Role Name", "Role Type", "Role ID", "Work Count"]
+    print_table(headers, role_data)
+
+
+def inspect_interactions(session: Session, instance_id: str):
+    """Display all interactions with their work counts."""
+    clear_screen()
+    print_header("🔗 Inspect Interactions")
+
+    # Query: Get all Local_Interactions and count their UOWs
+    interactions_query = (
+        session.query(
+            Local_Interactions.name,
+            Local_Interactions.interaction_id,
+            func.count(UnitsOfWork.uow_id).label("work_count"),
         )
         .join(
             Local_Workflows,
             Local_Interactions.local_workflow_id == Local_Workflows.local_workflow_id,
         )
-        .filter(
-            UnitsOfWork.instance_id == instance_id,
-            UnitsOfWork.status == UOWStatus.PENDING.value,
+        .outerjoin(
+            UnitsOfWork, Local_Interactions.interaction_id == UnitsOfWork.current_interaction_id
         )
-        .group_by(Local_Interactions.name, Local_Workflows.name)
+        .filter(Local_Workflows.instance_id == instance_id)
+        .group_by(Local_Interactions.name, Local_Interactions.interaction_id)
         .all()
     )
 
-    return [
-        {
-            "Workflow": row.workflow_name,
-            "Interaction": row.interaction_name,
-            "Pending Count": row.pending_count,
-        }
-        for row in queue_data
+    if not interactions_query:
+        print("No interactions found for this instance.")
+        return
+
+    # Prepare data for display
+    interaction_data = [
+        [interaction.name, str(interaction.interaction_id)[:8] + "...", interaction.work_count]
+        for interaction in interactions_query
     ]
 
+    # Sort by work count descending
+    interaction_data.sort(key=lambda x: x[2], reverse=True)
 
-def get_recent_history(session: Session, instance_id: str, limit: int = 50) -> List[Dict]:
-    """Get the most recent history log entries."""
-    history = (
-        session.query(
-            Interaction_Logs.log_id,
-            Interaction_Logs.timestamp,
-            UnitsOfWork.uow_id,
-            Local_Roles.name.label("role_name"),
-            Local_Interactions.name.label("interaction_name"),
-        )
-        .join(UnitsOfWork, Interaction_Logs.uow_id == UnitsOfWork.uow_id)
-        .join(Local_Roles, Interaction_Logs.role_id == Local_Roles.role_id)
-        .join(
-            Local_Interactions,
-            Interaction_Logs.interaction_id == Local_Interactions.interaction_id,
-        )
-        .filter(Interaction_Logs.instance_id == instance_id)
-        .order_by(Interaction_Logs.log_id.desc())
-        .limit(limit)
-        .all()
-    )
+    print(f"\nTotal Interactions: {len(interaction_data)}\n")
 
-    return [
-        {
-            "Log ID": row.log_id,
-            "Timestamp": row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else "N/A",
-            "UOW ID": str(row.uow_id)[:8] + "...",
-            "Role": row.role_name,
-            "Interaction": row.interaction_name,
-        }
-        for row in history
-    ]
+    headers = ["Interaction Name", "Interaction ID", "Work Count"]
+    print_table(headers, interaction_data)
 
 
-def sanitize_node_id(name: str) -> str:
-    """Sanitize a name for use as a Graphviz node ID."""
-    return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+def show_menu():
+    """Display the main menu and return user choice."""
+    print("\n" + "=" * 80)
+    print("  🦎 Chameleon Workflow Monitor - Main Menu")
+    print("=" * 80)
+    print("\n1. Monitor Global Status")
+    print("2. Inspect Roles")
+    print("3. Inspect Interactions")
+    print("4. Exit")
+    print("\n" + "-" * 80)
 
-
-def get_role_uow_counts(
-    session: Session, instance_id: str, workflow_id: str
-) -> Dict[str, Dict[str, int]]:
-    """Get UOW counts per role, categorized by status."""
-    # Note: This is a simplified implementation
-    # In a production system, you might track role locks more explicitly
-    # For now, we return empty counts as role-level tracking requires
-    # additional state management in the database
-    role_data = {}
-
-    # Get all roles for the workflow
-    roles = session.query(Local_Roles).filter(Local_Roles.local_workflow_id == workflow_id).all()
-
-    for role in roles:
-        # Initialize counts (all zeros for now)
-        role_data[role.name] = {
-            "active": 0,
-            "pending": 0,
-            "failed": 0,
-        }
-
-    return role_data
-
-
-def get_interaction_uow_counts(
-    session: Session, instance_id: str, workflow_id: str
-) -> Dict[str, Dict[str, int]]:
-    """Get UOW counts per interaction, categorized by status."""
-    interaction_data = {}
-
-    # Get all interactions for the workflow
-    interactions = (
-        session.query(Local_Interactions)
-        .filter(Local_Interactions.local_workflow_id == workflow_id)
-        .all()
-    )
-
-    for interaction in interactions:
-        # Count UOWs at this interaction by status
-        counts = (
-            session.query(UnitsOfWork.status, func.count(UnitsOfWork.uow_id))
-            .filter(
-                UnitsOfWork.instance_id == instance_id,
-                UnitsOfWork.current_interaction_id == interaction.interaction_id,
-            )
-            .group_by(UnitsOfWork.status)
-            .all()
-        )
-
-        interaction_data[interaction.name] = {
-            "pending": 0,
-            "active": 0,
-            "failed": 0,
-        }
-
-        for status, count in counts:
-            if status == UOWStatus.PENDING.value:
-                interaction_data[interaction.name]["pending"] = count
-            elif status == UOWStatus.ACTIVE.value:
-                interaction_data[interaction.name]["active"] = count
-            elif status == UOWStatus.FAILED.value:
-                interaction_data[interaction.name]["failed"] = count
-
-    return interaction_data
-
-
-def generate_workflow_graph(
-    session: Session, instance_id: str, workflow_id: str
-) -> Optional[graphviz.Digraph]:
-    """
-    Generate a Graphviz graph of the workflow topology with dynamic coloring.
-
-    Dynamic Coloring Rules:
-    - Roles with locked/active UOWs -> Blue
-    - Interactions with Pending UOWs -> Yellow (show count in label)
-    - Interactions with Failed UOWs -> Red
-    """
-    # Get workflow
-    workflow = (
-        session.query(Local_Workflows)
-        .filter(Local_Workflows.local_workflow_id == workflow_id)
-        .first()
-    )
-
-    if not workflow:
-        return None
-
-    # Get UOW counts for dynamic coloring
-    role_counts = get_role_uow_counts(session, instance_id, workflow_id)
-    interaction_counts = get_interaction_uow_counts(session, instance_id, workflow_id)
-
-    # Create graph
-    dot = graphviz.Digraph(comment=workflow.name)
-    dot.attr(label=workflow.name, labelloc="t", fontsize="16")
-    dot.attr("node", fontname="Arial")
-    dot.attr("edge", fontname="Arial")
-
-    # Role type colors (border colors)
-    role_type_colors = {
-        RoleType.ALPHA.value: "green",
-        RoleType.BETA.value: "blue",
-        RoleType.OMEGA.value: "black",
-        RoleType.EPSILON.value: "orange",
-        RoleType.TAU.value: "purple",
-    }
-
-    # Add roles as box nodes
-    for role in workflow.roles:
-        color = role_type_colors.get(role.role_type, "gray")
-        fillcolor = "lightgray"
-
-        # Check if role has active UOWs
-        if role.name in role_counts and role_counts[role.name]["active"] > 0:
-            fillcolor = "lightblue"
-
-        node_id = f"role_{sanitize_node_id(role.name)}"
-        dot.node(
-            node_id,
-            label=role.name,
-            shape="box",
-            style="filled",
-            fillcolor=fillcolor,
-            color=color,
-            penwidth="3",
-        )
-
-    # Add interactions as ellipse nodes
-    for interaction in workflow.interactions:
-        fillcolor = "lightgreen"
-        label = interaction.name
-
-        counts = interaction_counts.get(interaction.name, {})
-
-        # Priority: Red for failed, Yellow for pending, default green
-        if counts.get("failed", 0) > 0:
-            fillcolor = "lightcoral"
-            label = f"{interaction.name}\\n(Failed: {counts['failed']})"
-        elif counts.get("pending", 0) > 0:
-            fillcolor = "lightyellow"
-            label = f"{interaction.name}\\n(Pending: {counts['pending']})"
-
-        node_id = f"interaction_{sanitize_node_id(interaction.name)}"
-        dot.node(
-            node_id,
-            label=label,
-            shape="ellipse",
-            style="filled",
-            fillcolor=fillcolor,
-        )
-
-    # Add components as edges
-    for component in workflow.components:
-        role_id = f"role_{sanitize_node_id(component.role.name)}"
-        interaction_id = f"interaction_{sanitize_node_id(component.interaction.name)}"
-
-        if component.direction == ComponentDirection.OUTBOUND.value:
-            # Role -> Interaction
-            dot.edge(role_id, interaction_id, label=component.name)
-        else:  # INBOUND
-            # Interaction -> Role
-            dot.edge(interaction_id, role_id, label=component.name)
-
-    return dot
-
-
-def render_metrics(metrics: Dict[str, int]):
-    """Render key metrics as large cards."""
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        total_active = metrics["active"] + metrics["pending"]
-        st.metric(
-            label="🔄 Active UOWs",
-            value=total_active,
-            help="Total ACTIVE + PENDING UOWs",
-        )
-
-    with col2:
-        st.metric(
-            label="✅ Completed",
-            value=metrics["completed"],
-            help="Total completed UOWs",
-        )
-
-    with col3:
-        st.metric(
-            label="❌ Failed",
-            value=metrics["failed"],
-            delta=None,
-            delta_color="inverse" if metrics["failed"] > 0 else "off",
-            help="Total failed UOWs (Critical Alert)",
-        )
-
-    with col4:
-        st.metric(
-            label="🧟 Zombies",
-            value=metrics["zombies"],
-            delta=None,
-            delta_color="inverse" if metrics["zombies"] > 0 else "off",
-            help="UOWs with timeout/stale heartbeat",
-        )
+    while True:
+        try:
+            choice = input("\nEnter your choice (1-4): ").strip()
+            if choice in ["1", "2", "3", "4"]:
+                return choice
+            else:
+                print("Invalid choice. Please enter a number between 1 and 4.")
+        except (KeyboardInterrupt, EOFError):
+            print("\n")
+            return "4"
 
 
 def main():
     """Main application entry point."""
-    st.title("🦎 Chameleon Workflow Monitor")
-    st.markdown("**Real-time Control Room for the Workflow Engine**")
-    st.markdown("---")
-
-    # Sidebar Configuration
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-
-        # Database connection
-        default_db = "sqlite:///chameleon_instance.db"
-        db_url = st.text_input(
-            "Database Connection String",
-            value=default_db,
-            help="SQLAlchemy connection string for the instance database",
-        )
-
-        # Auto-refresh toggle and interval
-        enable_refresh = st.checkbox("Enable Auto-Refresh", value=False)
-        if enable_refresh:
-            refresh_interval = st.slider(
-                "Refresh Interval (seconds)", min_value=5, max_value=60, value=10
-            )
-            # Trigger auto-refresh
-            st_autorefresh(interval=refresh_interval * 1000, key="datarefresh")
-
-        # Manual refresh button
-        if st.button("🔄 Refresh Now", use_container_width=True):
-            st.rerun()
-
-        st.markdown("---")
-        st.caption("Chameleon Workflow Engine v0.1.0")
-
-    # Initialize database manager
-    try:
-        db_manager = get_db_manager(db_url)
-    except Exception as e:
-        st.error(f"Failed to connect to database: {e}")
-        st.stop()
-
-    # Get instances
-    try:
-        with db_manager.get_instance_session() as session:
-            instances = get_all_instances(session)
-
-            if not instances:
-                st.warning(
-                    "⚠️ No workflow instances found in the database. "
-                    "Please create an instance first using the workflow instantiation API."
-                )
-                st.stop()
-
-            # Instance selector
-            instance_options = {
-                f"{inst.name} ({str(inst.instance_id)[:8]}...)": str(inst.instance_id)
-                for inst in instances
-            }
-
-            with st.sidebar:
-                st.markdown("---")
-                selected_instance_label = st.selectbox(
-                    "Select Workflow Instance",
-                    options=list(instance_options.keys()),
-                    help="Choose the instance to monitor",
-                )
-                selected_instance_id = instance_options[selected_instance_label]
-
-            # Get selected instance details
-            selected_instance = next(
-                (inst for inst in instances if str(inst.instance_id) == selected_instance_id),
-                None,
-            )
-
-            if not selected_instance:
-                st.error("Selected instance not found.")
-                st.stop()
-
-            # Display instance info
-            st.info(
-                f"**Monitoring:** {selected_instance.name} | "
-                f"**Status:** {selected_instance.status} | "
-                f"**Deployed:** {selected_instance.deployment_date.strftime('%Y-%m-%d %H:%M') if selected_instance.deployment_date else 'N/A'}"
-            )
-
-            # Get metrics
-            metrics = get_uow_metrics(session, selected_instance_id)
-
-            # Render metrics dashboard
-            st.subheader("📊 Key Metrics")
-            render_metrics(metrics)
-
-            st.markdown("---")
-
-            # Get workflows for this instance
-            workflows = (
-                session.query(Local_Workflows)
-                .filter(Local_Workflows.instance_id == selected_instance_id)
-                .all()
-            )
-
-            if workflows:
-                # Workflow selector for graph
-                workflow_options = {
-                    f"{wf.name} (v{wf.version})": str(wf.local_workflow_id) for wf in workflows
-                }
-
-                selected_workflow_label = st.selectbox(
-                    "Select Workflow to Visualize",
-                    options=list(workflow_options.keys()),
-                    help="Choose the workflow to display in the graph",
-                )
-                selected_workflow_id = workflow_options[selected_workflow_label]
-
-                # Graph Visualization
-                st.subheader("🗺️ Workflow Topology Map")
-
-                try:
-                    graph = generate_workflow_graph(
-                        session, selected_instance_id, selected_workflow_id
-                    )
-
-                    if graph:
-                        st.graphviz_chart(graph)
-                    else:
-                        st.warning("Could not generate workflow graph.")
-                except Exception as e:
-                    st.error(f"Error generating graph: {e}")
-
-            st.markdown("---")
-
-            # Data Tables
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("🔨 Active Work")
-                active_work = get_active_work(session, selected_instance_id)
-                if active_work:
-                    st.dataframe(active_work, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No active work currently.")
-
-            with col2:
-                st.subheader("📦 Queue Depths")
-                queue_depths = get_queue_depths(session, selected_instance_id)
-                if queue_depths:
-                    st.dataframe(queue_depths, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No pending items in queues.")
-
-            st.markdown("---")
-
-            # History Log
-            st.subheader("📜 Recent History Log (Latest 50 Entries)")
-            history = get_recent_history(session, selected_instance_id, limit=50)
-            if history:
-                st.dataframe(history, use_container_width=True, hide_index=True)
-            else:
-                st.info("No history entries found.")
-
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-        import traceback
-
-        st.code(traceback.format_exc())
-
-
-if __name__ == "__main__":
-    # Parse command-line arguments (optional)
-    parser = argparse.ArgumentParser(description="Chameleon Workflow Monitor Dashboard")
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Chameleon Workflow Monitor - Interactive CLI")
     parser.add_argument(
         "--db-url",
         type=str,
         default="sqlite:///chameleon_instance.db",
-        help="Database connection URL",
+        help="Database connection URL (default: sqlite:///chameleon_instance.db)",
     )
-    args, unknown = parser.parse_known_args()
+    args = parser.parse_args()
 
-    # Run the Streamlit app
-    main()
+    # Initialize database manager
+    try:
+        db_manager = DatabaseManager(instance_url=args.db_url)
+        # Ensure the schema exists
+        try:
+            db_manager.create_instance_schema()
+        except Exception as schema_error:
+            # Schema likely already exists, log and continue
+            # In production, you might want to check for specific exceptions like
+            # sqlalchemy.exc.OperationalError for table already exists
+            import logging
+
+            logging.debug(f"Schema creation skipped: {schema_error}")
+    except Exception as e:
+        print(f"❌ Failed to connect to database: {e}")
+        print(f"Connection string: {args.db_url}")
+        sys.exit(1)
+
+    # Welcome message
+    clear_screen()
+    print_header("🦎 Chameleon Workflow Monitor")
+    print(f"Database: {args.db_url}")
+
+    if not TABULATE_AVAILABLE:
+        print("\n⚠️  Note: 'tabulate' package not found. Using basic table formatting.")
+        print("    Install with: pip install tabulate")
+
+    # Select instance
+    with db_manager.get_instance_session() as session:
+        instance_id = select_instance(session)
+
+        if not instance_id:
+            print("\nExiting...")
+            sys.exit(0)
+
+    # Main menu loop
+    while True:
+        choice = show_menu()
+
+        if choice == "1":
+            with db_manager.get_instance_session() as session:
+                monitor_global_status(session, instance_id)
+            input("\nPress Enter to continue...")
+
+        elif choice == "2":
+            with db_manager.get_instance_session() as session:
+                inspect_roles(session, instance_id)
+            input("\nPress Enter to continue...")
+
+        elif choice == "3":
+            with db_manager.get_instance_session() as session:
+                inspect_interactions(session, instance_id)
+            input("\nPress Enter to continue...")
+
+        elif choice == "4":
+            clear_screen()
+            print("\n👋 Thank you for using Chameleon Workflow Monitor!")
+            print("Goodbye!\n")
+            break
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n👋 Interrupted by user. Goodbye!\n")
+        sys.exit(0)

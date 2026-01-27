@@ -57,11 +57,9 @@ python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml
 You'll need the role UUIDs for each agent. Query the database to find them:
 
 ```python
-# Example using SQLite CLI
-sqlite3 instance.db "SELECT role_id, name FROM Local_Roles WHERE name IN ('AI_Analyzer', 'Auto_Calculator', 'Human_Approver');"
+# Example using SQLite CLI or use the setup helper script:
+python examples/setup_demo.py
 ```
-
-Or use a database browser to inspect the `Local_Roles` table.
 
 ### 3. Start the Workflow Engine Server
 

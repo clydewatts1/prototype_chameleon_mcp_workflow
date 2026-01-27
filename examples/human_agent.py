@@ -378,7 +378,7 @@ Examples:
         print()
         print("   To find the role ID:")
         print(
-            "   1. Import the workflow: python tools/workflow_manager.py -l -f tools/mixed_agent_workflow.yaml"
+            "   1. Import the workflow: python tools/workflow_manager.py -i -f tools/mixed_agent_workflow.yaml"
         )
         print("   2. Query the database for the Human_Approver role UUID")
         print()

@@ -299,11 +299,23 @@ def test_instantiate_workflow():
         return True
         
     finally:
-        # Clean up
+        # Clean up - dispose engines first to release file locks on Windows
+        try:
+            manager.close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)  # Brief pause to ensure file handles are released
         if os.path.exists(template_db):
-            os.remove(template_db)
+            try:
+                os.remove(template_db)
+            except PermissionError:
+                pass
         if os.path.exists(instance_db):
-            os.remove(instance_db)
+            try:
+                os.remove(instance_db)
+            except PermissionError:
+                pass
 
 
 def test_checkout_and_submit_work():
@@ -424,10 +436,23 @@ def test_checkout_and_submit_work():
         return True
         
     finally:
+        # Clean up - dispose engines first to release file locks on Windows
+        try:
+            manager.close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)  # Brief pause to ensure file handles are released
         if os.path.exists(template_db):
-            os.remove(template_db)
+            try:
+                os.remove(template_db)
+            except PermissionError:
+                pass
         if os.path.exists(instance_db):
-            os.remove(instance_db)
+            try:
+                os.remove(instance_db)
+            except PermissionError:
+                pass
 
 
 def test_report_failure():
@@ -534,10 +559,23 @@ def test_report_failure():
         return True
         
     finally:
+        # Clean up - dispose engines first to release file locks on Windows
+        try:
+            manager.close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)  # Brief pause to ensure file handles are released
         if os.path.exists(template_db):
-            os.remove(template_db)
+            try:
+                os.remove(template_db)
+            except PermissionError:
+                pass
         if os.path.exists(instance_db):
-            os.remove(instance_db)
+            try:
+                os.remove(instance_db)
+            except PermissionError:
+                pass
 
 
 if __name__ == "__main__":

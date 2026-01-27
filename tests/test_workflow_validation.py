@@ -33,7 +33,12 @@ class TestWorkflowValidation(unittest.TestCase):
     def tearDown(self):
         """Clean up test database and temporary files."""
         self.manager.close()
-        os.unlink(self.temp_db.name)
+        import time
+        time.sleep(0.1)  # Brief pause to ensure file handles are released on Windows
+        try:
+            os.unlink(self.temp_db.name)
+        except PermissionError:
+            pass  # File may be locked on Windows; it will be cleaned up by temp
         # Clean up temp directory
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)

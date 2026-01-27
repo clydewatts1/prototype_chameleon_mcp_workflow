@@ -189,7 +189,12 @@ class TestWorkflowManager(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test database."""
         cls.db_manager.close()
-        os.unlink(cls.temp_db.name)
+        import time
+        time.sleep(0.1)  # Pause to release file locks on Windows
+        try:
+            os.unlink(cls.temp_db.name)
+        except PermissionError:
+            pass  # File may be locked on Windows
 
     def test_export_yaml(self):
         """Test YAML export functionality."""

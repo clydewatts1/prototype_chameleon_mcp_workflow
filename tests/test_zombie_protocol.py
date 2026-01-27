@@ -208,9 +208,18 @@ def test_heartbeat_endpoint():
         print("✓ All heartbeat endpoint tests passed")
         
     finally:
-        # Cleanup
+        # Cleanup - dispose and pause to release file locks on Windows
+        try:
+            test_data['manager'].close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)
         if os.path.exists(test_data['db_path']):
-            os.unlink(test_data['db_path'])
+            try:
+                os.unlink(test_data['db_path'])
+            except PermissionError:
+                pass
 
 
 def test_zombie_sweeper_logic():
@@ -291,12 +300,18 @@ def test_zombie_sweeper_logic():
         print("✓ All zombie sweeper tests passed")
         
     finally:
-        # Cleanup
+        # Cleanup - dispose and pause to release file locks on Windows
+        try:
+            test_data['manager'].close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)
         if os.path.exists(test_data['db_path']):
-            os.unlink(test_data['db_path'])
-
-
-def test_zombie_sweeper_background_task():
+            try:
+                os.unlink(test_data['db_path'])
+            except PermissionError:
+                pass
     """Test that the background sweeper task runs and processes zombies"""
     print("\n=== Testing Zombie Sweeper Background Task ===")
     
@@ -318,12 +333,18 @@ def test_zombie_sweeper_background_task():
         print("✓ Background task integration verified (logic tested separately)")
         
     finally:
-        # Cleanup
+        # Cleanup - dispose and pause to release file locks on Windows
+        try:
+            test_data['manager'].close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)
         if os.path.exists(test_data['db_path']):
-            os.unlink(test_data['db_path'])
-
-
-if __name__ == "__main__":
+            try:
+                os.unlink(test_data['db_path'])
+            except PermissionError:
+                pass
     print("=" * 60)
     print("Zombie Actor Protocol Test Suite")
     print("=" * 60)

@@ -453,12 +453,15 @@ def test_vertical_slice_happy_path(db_manager, loaded_workflow_template):
     
     assert checkout_result is not None, "checkout_work() returned None - no work available"
     
-    uow_id, checked_out_attributes = checkout_result
+    uow_id = checkout_result["uow_id"]
+    checked_out_attributes = checkout_result["attributes"]
+    context = checkout_result["context"]
     assert uow_id == alpha_uow_id, "Checked out UOW should be the Alpha UOW"
     
     print(f"✓ Step 3 (Beta Checkout): UOW checked out by actor {processor_actor_id}")
     print(f"  - UOW ID: {uow_id}")
     print(f"  - Attributes: {list(checked_out_attributes.keys())}")
+    print(f"  - Context: {list(context.keys())}")
     
     # Verify status is now IN_PROGRESS (ACTIVE in the current enum)
     with db_manager.get_instance_session() as session:

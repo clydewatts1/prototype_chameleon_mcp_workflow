@@ -36,6 +36,7 @@ from database import (
     Local_Actors,
     UnitsOfWork,
     UOW_Attributes,
+    Local_Role_Attributes,
     # Enums
     RoleType,
     ComponentDirection,
@@ -379,9 +380,12 @@ def test_checkout_and_submit_work():
         )
         
         assert result is not None, "No work available to checkout"
-        uow_id, attributes = result
+        uow_id = result["uow_id"]
+        attributes = result["attributes"]
+        context = result["context"]
         print(f"✓ Work checked out: UOW {uow_id}")
         print(f"  Attributes: {attributes}")
+        print(f"  Context: {context}")
         
         # Verify UOW is now in ACTIVE status
         with manager.get_instance_session() as session:
@@ -502,7 +506,7 @@ def test_report_failure():
         
         result = engine.checkout_work(actor_id=actor_id, role_id=beta_role_id)
         assert result is not None
-        uow_id, _ = result
+        uow_id = result["uow_id"]
         print(f"✓ Work checked out: {uow_id}")
         
         # Report failure
@@ -578,6 +582,279 @@ def test_report_failure():
                 pass
 
 
+def test_memory_context():
+    """Test memory context injection during work checkout."""
+    print("\n=== Testing Memory Context Injection ===")
+    
+    # Create temporary databases
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp1:
+        template_db = tmp1.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp2:
+        instance_db = tmp2.name
+    
+    try:
+        # Initialize and create workflow
+        manager = DatabaseManager(
+            template_url=f"sqlite:///{template_db}",
+            instance_url=f"sqlite:///{instance_db}"
+        )
+        manager.create_template_schema()
+        manager.create_instance_schema()
+        
+        template_id = create_simple_template_workflow(manager)
+        engine = ChameleonEngine(manager)
+        
+        initial_context = {"test_key": "test_value"}
+        instance_id = engine.instantiate_workflow(
+            template_id=template_id,
+            initial_context=initial_context
+        )
+        
+        print(f"✓ Workflow instantiated: {instance_id}")
+        
+        # Create test actors
+        actor1_id = uuid.uuid4()
+        actor2_id = uuid.uuid4()
+        
+        with manager.get_instance_session() as session:
+            actor1 = Local_Actors(
+                actor_id=actor1_id,
+                instance_id=instance_id,
+                identity_key="test_actor_1",
+                name="Test Actor 1",
+                type="HUMAN"
+            )
+            actor2 = Local_Actors(
+                actor_id=actor2_id,
+                instance_id=instance_id,
+                identity_key="test_actor_2",
+                name="Test Actor 2",
+                type="HUMAN"
+            )
+            session.add(actor1)
+            session.add(actor2)
+            session.commit()
+        
+        print(f"✓ Test actors created: {actor1_id}, {actor2_id}")
+        
+        # Get the Beta role ID
+        with manager.get_instance_session() as session:
+            beta_role = session.query(Local_Roles).filter(
+                and_(
+                    Local_Roles.role_type == RoleType.BETA.value
+                )
+            ).first()
+            beta_role_id = beta_role.role_id
+        
+        print(f"✓ Beta role found: {beta_role_id}")
+        
+        # Add memory attributes for testing
+        with manager.get_instance_session() as session:
+            # Global Blueprint (shared across all actors)
+            global_memory1 = Local_Role_Attributes(
+                instance_id=instance_id,
+                role_id=beta_role_id,
+                context_type="GLOBAL",
+                context_id="GLOBAL",
+                actor_id=None,
+                key="company_policy",
+                value={"rule": "Always check tax codes"},
+                confidence_score=80,
+                is_toxic=False
+            )
+            
+            global_memory2 = Local_Role_Attributes(
+                instance_id=instance_id,
+                role_id=beta_role_id,
+                context_type="GLOBAL",
+                context_id="GLOBAL",
+                actor_id=None,
+                key="approval_threshold",
+                value={"amount": 10000},
+                confidence_score=90,
+                is_toxic=False
+            )
+            
+            # Toxic memory (should be filtered out)
+            toxic_memory = Local_Role_Attributes(
+                instance_id=instance_id,
+                role_id=beta_role_id,
+                context_type="GLOBAL",
+                context_id="GLOBAL",
+                actor_id=None,
+                key="bad_pattern",
+                value={"error": "This caused failures"},
+                confidence_score=10,
+                is_toxic=True
+            )
+            
+            # Personal Playbook for Actor 1 (overrides global)
+            personal_memory1 = Local_Role_Attributes(
+                instance_id=instance_id,
+                role_id=beta_role_id,
+                context_type="ACTOR",
+                context_id=str(actor1_id),
+                actor_id=actor1_id,
+                key="approval_threshold",  # Overrides global
+                value={"amount": 5000},  # Lower threshold for this actor
+                confidence_score=95,
+                is_toxic=False
+            )
+            
+            personal_memory2 = Local_Role_Attributes(
+                instance_id=instance_id,
+                role_id=beta_role_id,
+                context_type="ACTOR",
+                context_id=str(actor1_id),
+                actor_id=actor1_id,
+                key="personal_preference",
+                value={"vendor": "Always use Vendor X"},
+                confidence_score=85,
+                is_toxic=False
+            )
+            
+            session.add_all([
+                global_memory1, global_memory2, toxic_memory,
+                personal_memory1, personal_memory2
+            ])
+            session.commit()
+        
+        print("✓ Memory attributes created (2 global, 1 toxic, 2 personal)")
+        
+        # Test 1: Actor 1 checkout - should get global + personal (with override)
+        result1 = engine.checkout_work(
+            actor_id=actor1_id,
+            role_id=beta_role_id
+        )
+        
+        assert result1 is not None, "No work available to checkout"
+        context1 = result1["context"]
+        print(f"✓ Actor 1 checked out work with context: {context1}")
+        
+        # Verify context content for Actor 1
+        assert "company_policy" in context1, "Global memory not in context"
+        assert "approval_threshold" in context1, "Approval threshold not in context"
+        assert "personal_preference" in context1, "Personal memory not in context"
+        assert "bad_pattern" not in context1, "Toxic memory should be filtered out"
+        
+        # Verify Actor 1's personal threshold overrides global
+        assert context1["approval_threshold"]["amount"] == 5000, \
+            "Actor-specific memory should override global (expected 5000)"
+        print("✓ Context merge verified: Actor-specific overrides Global")
+        
+        # Verify toxic filtering
+        print("✓ Toxic memory filtered out correctly")
+        
+        # Verify last_accessed_at was updated
+        with manager.get_instance_session() as session:
+            memories = session.query(Local_Role_Attributes).filter(
+                and_(
+                    Local_Role_Attributes.role_id == beta_role_id,
+                    Local_Role_Attributes.is_toxic == False
+                )
+            ).all()
+            
+            for memory in memories:
+                assert memory.last_accessed_at is not None, \
+                    f"last_accessed_at not updated for memory {memory.key}"
+            
+            print("✓ last_accessed_at timestamps updated")
+        
+        # Submit the work to free up the UOW
+        engine.submit_work(
+            uow_id=result1["uow_id"],
+            actor_id=actor1_id,
+            result_attributes={"completed": True},
+            reasoning="Test completion"
+        )
+        
+        # Test 2: Actor 2 checkout - should only get global (no personal memory)
+        # Need to create another UOW for testing
+        with manager.get_instance_session() as session:
+            # Re-query beta_role within the session
+            beta_role = session.query(Local_Roles).filter(
+                Local_Roles.role_id == beta_role_id
+            ).first()
+            
+            # Find an interaction to place a new UOW
+            beta_interaction = session.query(Local_Interactions).join(
+                Local_Components,
+                and_(
+                    Local_Components.interaction_id == Local_Interactions.interaction_id,
+                    Local_Components.role_id == beta_role_id,
+                    Local_Components.direction == ComponentDirection.INBOUND.value
+                )
+            ).first()
+            
+            if beta_interaction:
+                new_uow = UnitsOfWork(
+                    instance_id=instance_id,
+                    local_workflow_id=beta_role.local_workflow_id,
+                    current_interaction_id=beta_interaction.interaction_id,
+                    status=UOWStatus.PENDING.value
+                )
+                session.add(new_uow)
+                session.flush()
+                
+                # Add initial attributes
+                attr = UOW_Attributes(
+                    uow_id=new_uow.uow_id,
+                    instance_id=instance_id,
+                    key="test_key",
+                    value="test_value",
+                    version=1,
+                    actor_id=actor1_id,
+                    reasoning="Initial data"
+                )
+                session.add(attr)
+                session.commit()
+                
+                print("✓ Created second UOW for Actor 2 testing")
+                
+                # Actor 2 checkout
+                result2 = engine.checkout_work(
+                    actor_id=actor2_id,
+                    role_id=beta_role_id
+                )
+                
+                assert result2 is not None, "No work available for Actor 2"
+                context2 = result2["context"]
+                print(f"✓ Actor 2 checked out work with context: {context2}")
+                
+                # Verify context content for Actor 2
+                assert "company_policy" in context2, "Global memory not in context"
+                assert "approval_threshold" in context2, "Approval threshold not in context"
+                assert "personal_preference" not in context2, \
+                    "Actor 1's personal memory should not appear for Actor 2"
+                
+                # Verify Actor 2 gets the global threshold (not Actor 1's override)
+                assert context2["approval_threshold"]["amount"] == 10000, \
+                    "Actor 2 should get global threshold (expected 10000)"
+                print("✓ Context isolation verified: Actor 2 only sees global memory")
+        
+        print("\n✅ Memory context test PASSED")
+        return True
+        
+    finally:
+        # Clean up - dispose engines first to release file locks on Windows
+        try:
+            manager.close()
+        except Exception:
+            pass
+        import time
+        time.sleep(0.1)  # Brief pause to ensure file handles are released
+        if os.path.exists(template_db):
+            try:
+                os.remove(template_db)
+            except PermissionError:
+                pass
+        if os.path.exists(instance_db):
+            try:
+                os.remove(instance_db)
+            except PermissionError:
+                pass
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print("CHAMELEON ENGINE - CORE CONTROLLER TESTS")
@@ -588,6 +865,7 @@ if __name__ == "__main__":
         test_instantiate_workflow()
         test_checkout_and_submit_work()
         test_report_failure()
+        test_memory_context()
         
         print("\n" + "=" * 70)
         print("✅ ALL TESTS PASSED")

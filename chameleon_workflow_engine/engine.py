@@ -1309,3 +1309,258 @@ class ChameleonEngine:
                 
             except Exception as e:
                 raise RuntimeError(f"Failed to retrieve memory: {str(e)}") from e
+
+    def run_zombie_protocol(
+        self, session: Session, timeout_seconds: int = 300
+    ) -> int:
+        """
+        Implement the Zombie Actor Protocol (Article XI.3).
+
+        Identifies Units of Work that have been locked (status='ACTIVE') for longer
+        than the timeout threshold and resets/fails them. This ensures work doesn't
+        remain indefinitely locked due to Actor failure, system crashes, or network disruptions.
+
+        The Tau (Chronometer) Role monitors execution health and reclaims stalled work by:
+        1. Querying for zombie UOWs (ACTIVE with old last_heartbeat)
+        2. Logging a "Zombie Detection" event in Interaction_Logs
+        3. Updating status to FAILED
+        4. Routing to the Chronos Interaction (Tau waiting room)
+        5. Clearing the heartbeat timestamp
+
+        Args:
+            session: Active database session
+            timeout_seconds: Threshold in seconds (default: 300 = 5 minutes)
+
+        Returns:
+            Count of zombie UOWs reclaimed
+
+        Raises:
+            RuntimeError: If zombie protocol execution fails
+        """
+        try:
+            from datetime import timedelta
+
+            # Calculate the zombie threshold
+            zombie_threshold = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+
+            # Query for zombie UOWs
+            zombies = (
+                session.query(UnitsOfWork)
+                .filter(
+                    and_(
+                        UnitsOfWork.status == UOWStatus.ACTIVE.value,
+                        UnitsOfWork.last_heartbeat < zombie_threshold,
+                        UnitsOfWork.last_heartbeat.isnot(None),
+                    )
+                )
+                .all()
+            )
+
+            if not zombies:
+                logger.info("Zombie Protocol: No zombie actors detected")
+                return 0
+
+            logger.warning(f"Zombie Protocol: Found {len(zombies)} stale UOW(s)")
+
+            for zombie_uow in zombies:
+                logger.warning(
+                    f"Zombie Protocol: Reclaiming Token - UOW {zombie_uow.uow_id}, "
+                    f"last heartbeat: {zombie_uow.last_heartbeat}"
+                )
+
+                # Find the Tau role and Chronos interaction in this workflow
+                tau_role = (
+                    session.query(Local_Roles)
+                    .filter(
+                        and_(
+                            Local_Roles.local_workflow_id == zombie_uow.local_workflow_id,
+                            Local_Roles.role_type == RoleType.TAU.value,
+                        )
+                    )
+                    .first()
+                )
+
+                chronos_interaction_id = None
+                if tau_role:
+                    # Find the INBOUND component for Tau role (the Chronos interaction)
+                    chronos_component = (
+                        session.query(Local_Components)
+                        .filter(
+                            and_(
+                                Local_Components.role_id == tau_role.role_id,
+                                Local_Components.direction == ComponentDirection.INBOUND.value,
+                            )
+                        )
+                        .first()
+                    )
+
+                    if chronos_component:
+                        chronos_interaction_id = chronos_component.interaction_id
+
+                # Update UOW status to FAILED
+                zombie_uow.status = UOWStatus.FAILED.value
+
+                # Route to Chronos interaction if found, otherwise leave in current location
+                if chronos_interaction_id:
+                    zombie_uow.current_interaction_id = chronos_interaction_id
+
+                # Clear the heartbeat (release the lock)
+                zombie_uow.last_heartbeat = None
+
+                # Log the zombie detection event in Interaction_Logs
+                from database.models_instance import Interaction_Logs
+
+                log_entry = Interaction_Logs(
+                    instance_id=zombie_uow.instance_id,
+                    uow_id=zombie_uow.uow_id,
+                    actor_id=SYSTEM_ACTOR_ID,
+                    role_id=tau_role.role_id if tau_role else SYSTEM_ACTOR_ID,
+                    interaction_id=zombie_uow.current_interaction_id,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                session.add(log_entry)
+
+            # Commit the changes
+            session.commit()
+
+            logger.info(f"Zombie Protocol: Reclaimed {len(zombies)} zombie tokens")
+            return len(zombies)
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Zombie Protocol failed: {str(e)}")
+            raise RuntimeError(f"Failed to execute zombie protocol: {str(e)}") from e
+
+    def run_memory_decay(
+        self, session: Session, retention_days: int = 90
+    ) -> int:
+        """
+        Implement Memory Decay / Relevance Decay (Article XX.3 - The Janitor).
+
+        Removes old/stale memory entries to prevent bloat. This background process
+        scans for memory attributes that haven't been accessed for longer than the
+        retention period and hard deletes them.
+
+        The Janitor prevents memory bloat by:
+        1. Querying Local_Role_Attributes where last_accessed_at < NOW - retention_days
+        2. Hard deleting these rows
+        3. Returning count of deleted records
+
+        Args:
+            session: Active database session
+            retention_days: Retention period in days (default: 90)
+
+        Returns:
+            Count of memory entries deleted
+
+        Raises:
+            RuntimeError: If memory decay execution fails
+        """
+        try:
+            from datetime import timedelta
+
+            # Calculate the decay threshold
+            decay_threshold = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
+            # Query for stale memories
+            stale_memories = (
+                session.query(Local_Role_Attributes)
+                .filter(
+                    and_(
+                        Local_Role_Attributes.last_accessed_at < decay_threshold,
+                        Local_Role_Attributes.last_accessed_at.isnot(None),
+                    )
+                )
+                .all()
+            )
+
+            if not stale_memories:
+                logger.info(f"Memory Decay: No stale memories found (retention: {retention_days} days)")
+                return 0
+
+            logger.info(
+                f"Memory Decay: Found {len(stale_memories)} stale memory entries "
+                f"(not accessed in {retention_days} days)"
+            )
+
+            # Hard delete the stale memories
+            for memory in stale_memories:
+                logger.debug(
+                    f"Memory Decay: Deleting memory {memory.memory_id} (key: {memory.key}, "
+                    f"last accessed: {memory.last_accessed_at})"
+                )
+                session.delete(memory)
+
+            # Commit the changes
+            session.commit()
+
+            logger.info(f"Memory Decay: Deleted {len(stale_memories)} stale memory entries")
+            return len(stale_memories)
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Memory Decay failed: {str(e)}")
+            raise RuntimeError(f"Failed to execute memory decay: {str(e)}") from e
+
+    def mark_memory_toxic(
+        self, memory_id: uuid.UUID, reason: str
+    ) -> bool:
+        """
+        Mark a specific memory as "Toxic" (Article XX.1 - The Toxic Knowledge Filter).
+
+        Allows flagging specific memories so they are ignored during execution. This is
+        triggered when a UOW reaches FAILED status and requires Epsilon remediation, or
+        when an Admin flags a result as incorrect.
+
+        The Toxic Knowledge Filter:
+        1. Fetches the Local_Role_Attributes record by memory_id
+        2. Sets is_toxic = True
+        3. Logs this administrative action
+
+        Toxic attributes are automatically excluded during memory context building
+        (see _build_memory_context method).
+
+        Args:
+            memory_id: UUID of the memory to mark as toxic
+            reason: Human-readable reason for marking this memory toxic
+
+        Returns:
+            True if successful
+
+        Raises:
+            ValueError: If memory not found
+            RuntimeError: If marking fails
+        """
+        with self.db_manager.get_instance_session() as session:
+            try:
+                # Fetch the memory record
+                memory = (
+                    session.query(Local_Role_Attributes)
+                    .filter(Local_Role_Attributes.memory_id == memory_id)
+                    .first()
+                )
+
+                if not memory:
+                    raise ValueError(f"Memory {memory_id} not found")
+
+                # Mark as toxic
+                memory.is_toxic = True
+
+                # Log the action
+                logger.warning(
+                    f"Toxic Knowledge Filter: Memory {memory_id} (key: {memory.key}) "
+                    f"marked as toxic. Reason: {reason}"
+                )
+
+                # Commit the change
+                session.commit()
+
+                logger.info(f"Toxic Knowledge Filter: Successfully marked memory {memory_id} as toxic")
+                return True
+
+            except ValueError:
+                raise
+            except Exception as e:
+                session.rollback()
+                logger.error(f"Failed to mark memory {memory_id} as toxic: {str(e)}")
+                raise RuntimeError(f"Failed to mark memory as toxic: {str(e)}") from e

@@ -17,7 +17,8 @@ This project is designed to work seamlessly with:
 prototype_chameleon_mcp_workflow/
 ├── chameleon_workflow_engine/    # Workflow engine server
 │   ├── __init__.py              # Module initialization
-│   └── server.py                # FastAPI-based workflow engine
+│   ├── server.py                # FastAPI-based workflow engine
+│   └── SERVER_PROMPT.md         # Developer guidance for server.py
 ├── database/                     # Database module
 │   ├── __init__.py              # Package exports
 │   ├── README.md                # Database documentation
@@ -131,6 +132,10 @@ The workflow engine is built with FastAPI and provides REST API endpoints for:
 - State management and persistence
 - Event-driven architecture
 - RESTful API interface
+- Zombie actor detection and cleanup (TAU role)
+- UOW heartbeat monitoring
+
+See [chameleon_workflow_engine/SERVER_PROMPT.md](chameleon_workflow_engine/SERVER_PROMPT.md) for detailed developer guidance on the workflow engine server.
 
 ### Database Module
 

@@ -1,0 +1,328 @@
+workflow:
+  name: "Mixed_Agent_Demo_Workflow"
+  description: "Pilot phase workflow demonstrating Human, AI, and Auto agent coordination"
+  version: 1
+  ai_context:
+    purpose: "Showcase the flexibility of the Chameleon system with mixed agent types"
+    business_rules: "AI analyzes input, Auto calculates score, Human approves final decision"
+  schema_json:
+    topology: "sequential pipeline with mixed agents"
+
+roles:
+  - name: "Initiator"
+    role_type: "ALPHA"
+    description: "System-triggered role that starts the workflow"
+    ai_context:
+      persona: "You are the workflow initiator"
+      instructions: "Create well-formed UOWs with initial input text"
+
+  - name: "AI_Analyzer"
+    role_type: "BETA"
+    strategy: "HOMOGENEOUS"
+    description: "Analyze the input and provide a summary (Ollama Agent)"
+    ai_context:
+      persona: "You are an AI-powered text analysis agent"
+      instructions: "Extract key insights from input text and provide concise summaries"
+
+  - name: "Auto_Calculator"
+    role_type: "BETA"
+    strategy: "HOMOGENEOUS"
+    description: "Calculate a score based on the AI summary (Auto Agent)"
+    ai_context:
+      persona: "You are a deterministic scoring calculator"
+      instructions: "Compute a numerical score based on the AI summary length and content"
+
+  - name: "Human_Approver"
+    role_type: "BETA"
+    strategy: "HOMOGENEOUS"
+    description: "Review the AI summary and Auto score. Approve or Reject (Human Agent)"
+    ai_context:
+      persona: "You are a human reviewer making final approval decisions"
+      instructions: "Review AI analysis and Auto score, then decide to approve or reject"
+
+  - name: "Archiver"
+    role_type: "OMEGA"
+    description: "Final archival role that stores completed workflow results"
+    ai_context:
+      persona: "You are the workflow archiver"
+      instructions: "Archive completed workflows with all collected data"
+
+  - name: "Error_Handler"
+    role_type: "EPSILON"
+    description: "Handles validation errors and processing failures"
+    ai_context:
+      persona: "You are a problem solver for workflow errors"
+      instructions: "Fix data quality issues and validation failures"
+
+  - name: "Timeout_Manager"
+    role_type: "TAU"
+    description: "Manages timeouts and escalations"
+    ai_context:
+      persona: "You are a deadline enforcer"
+      instructions: "Escalate work items that exceed time limits"
+
+interactions:
+  - name: "Initial_Queue"
+    description: "Queue for new workflow instances from Alpha"
+    ai_context:
+      purpose: "Holds newly created UOWs before AI analysis"
+
+  - name: "AI_Analysis_Queue"
+    description: "Queue for UOWs awaiting AI analysis"
+    ai_context:
+      purpose: "Holds UOWs ready for Ollama agent processing"
+
+  - name: "Calculation_Queue"
+    description: "Queue for UOWs awaiting score calculation"
+    ai_context:
+      purpose: "Holds analyzed UOWs ready for Auto agent scoring"
+
+  - name: "Approval_Queue"
+    description: "Queue for UOWs awaiting human approval"
+    ai_context:
+      purpose: "Holds scored UOWs ready for human review"
+
+  - name: "Archive_Queue"
+    description: "Queue for approved UOWs awaiting archival"
+    ai_context:
+      purpose: "Holds approved UOWs ready for final archival"
+
+  - name: "Error_Queue"
+    description: "Queue for UOWs with errors"
+    ai_context:
+      purpose: "Holds UOWs that failed processing"
+
+  - name: "Timeout_Queue"
+    description: "Queue for timed-out UOWs"
+    ai_context:
+      purpose: "Holds UOWs that exceeded processing time limits"
+
+  - name: "Completed_Queue"
+    description: "Final queue for archived workflows"
+    ai_context:
+      purpose: "Final destination for successfully completed workflows"
+
+components:
+  # Alpha (Initiator) outbound to Initial Queue
+  - name: "Initiator_To_Initial"
+    role_name: "Initiator"
+    interaction_name: "Initial_Queue"
+    direction: "OUTBOUND"
+    description: "Route new UOWs from Initiator to Initial Queue"
+    ai_context:
+      data_flow: "Fresh UOW with input text"
+
+  # AI_Analyzer inbound from Initial Queue
+  - name: "AI_From_Initial"
+    role_name: "AI_Analyzer"
+    interaction_name: "Initial_Queue"
+    direction: "INBOUND"
+    description: "AI Analyzer pulls UOWs from Initial Queue"
+    ai_context:
+      data_flow: "Retrieve next UOW for AI analysis"
+
+  # AI_Analyzer outbound to AI Analysis Queue
+  - name: "AI_To_Analysis"
+    role_name: "AI_Analyzer"
+    interaction_name: "AI_Analysis_Queue"
+    direction: "OUTBOUND"
+    description: "Send analyzed UOWs to Analysis Queue"
+    ai_context:
+      data_flow: "UOW with AI-generated summary"
+
+  # Auto_Calculator inbound from AI Analysis Queue
+  - name: "Auto_From_Analysis"
+    role_name: "Auto_Calculator"
+    interaction_name: "AI_Analysis_Queue"
+    direction: "INBOUND"
+    description: "Auto Calculator pulls UOWs from Analysis Queue"
+    ai_context:
+      data_flow: "Retrieve AI-analyzed UOW for scoring"
+
+  # Auto_Calculator outbound to Calculation Queue
+  - name: "Auto_To_Calculation"
+    role_name: "Auto_Calculator"
+    interaction_name: "Calculation_Queue"
+    direction: "OUTBOUND"
+    description: "Send scored UOWs to Calculation Queue"
+    ai_context:
+      data_flow: "UOW with calculated score"
+
+  # Human_Approver inbound from Calculation Queue
+  - name: "Human_From_Calculation"
+    role_name: "Human_Approver"
+    interaction_name: "Calculation_Queue"
+    direction: "INBOUND"
+    description: "Human Approver pulls UOWs from Calculation Queue"
+    ai_context:
+      data_flow: "Retrieve scored UOW for human review"
+
+  # Human_Approver outbound to Approval Queue
+  - name: "Human_To_Approval"
+    role_name: "Human_Approver"
+    interaction_name: "Approval_Queue"
+    direction: "OUTBOUND"
+    description: "Send approved UOWs to Approval Queue"
+    ai_context:
+      data_flow: "UOW with human approval decision"
+
+  # Archiver inbound from Approval Queue
+  - name: "Archiver_From_Approval"
+    role_name: "Archiver"
+    interaction_name: "Approval_Queue"
+    direction: "INBOUND"
+    description: "Archiver pulls approved UOWs"
+    ai_context:
+      data_flow: "Retrieve approved UOW for archival"
+
+  # Archiver outbound to Completed Queue
+  - name: "Archiver_To_Complete"
+    role_name: "Archiver"
+    interaction_name: "Completed_Queue"
+    direction: "OUTBOUND"
+    description: "Send archived UOWs to Completed Queue"
+    ai_context:
+      data_flow: "Fully processed and archived UOW"
+
+  # Error Handler components
+  - name: "AI_To_Error"
+    role_name: "AI_Analyzer"
+    interaction_name: "Error_Queue"
+    direction: "OUTBOUND"
+    description: "Route failed AI analysis to error handler"
+    ai_context:
+      data_flow: "UOW with AI processing error"
+
+  - name: "Auto_To_Error"
+    role_name: "Auto_Calculator"
+    interaction_name: "Error_Queue"
+    direction: "OUTBOUND"
+    description: "Route failed calculations to error handler"
+    ai_context:
+      data_flow: "UOW with calculation error"
+
+  - name: "Human_To_Error"
+    role_name: "Human_Approver"
+    interaction_name: "Error_Queue"
+    direction: "OUTBOUND"
+    description: "Route rejected UOWs to error handler"
+    ai_context:
+      data_flow: "UOW rejected by human approver"
+
+  - name: "Error_From_Queue"
+    role_name: "Error_Handler"
+    interaction_name: "Error_Queue"
+    direction: "INBOUND"
+    description: "Error handler pulls failed UOWs"
+    ai_context:
+      data_flow: "Retrieve UOW with errors to remediate"
+
+  - name: "Error_To_Initial"
+    role_name: "Error_Handler"
+    interaction_name: "Initial_Queue"
+    direction: "OUTBOUND"
+    description: "Return fixed UOWs to initial queue for retry"
+    ai_context:
+      data_flow: "Remediated UOW ready for reprocessing"
+
+  # Timeout Manager components
+  - name: "Timeout_From_Queue"
+    role_name: "Timeout_Manager"
+    interaction_name: "Timeout_Queue"
+    direction: "INBOUND"
+    description: "Timeout manager pulls stale UOWs"
+    ai_context:
+      data_flow: "Retrieve timed-out UOWs"
+
+  - name: "Timeout_To_Error"
+    role_name: "Timeout_Manager"
+    interaction_name: "Error_Queue"
+    direction: "OUTBOUND"
+    description: "Route timed-out UOWs to error handler"
+    ai_context:
+      data_flow: "Escalated UOW requiring attention"
+
+guardians:
+  # Pass-through guards for the main pipeline
+  - name: "AI_Inbound_Guard"
+    component_name: "AI_From_Initial"
+    type: "PASS_THRU"
+    description: "Allows all UOWs to AI Analyzer"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Simple pass-through for AI analysis"
+
+  - name: "AI_Success_Guard"
+    component_name: "AI_To_Analysis"
+    type: "PASS_THRU"
+    description: "Allows AI-analyzed UOWs through"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Pass-through for successfully analyzed UOWs"
+
+  - name: "Auto_Inbound_Guard"
+    component_name: "Auto_From_Analysis"
+    type: "PASS_THRU"
+    description: "Allows all analyzed UOWs to Auto Calculator"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Simple pass-through for score calculation"
+
+  - name: "Auto_Success_Guard"
+    component_name: "Auto_To_Calculation"
+    type: "PASS_THRU"
+    description: "Allows scored UOWs through"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Pass-through for successfully scored UOWs"
+
+  - name: "Human_Inbound_Guard"
+    component_name: "Human_From_Calculation"
+    type: "PASS_THRU"
+    description: "Allows all scored UOWs to Human Approver"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Simple pass-through for human review"
+
+  - name: "Human_Approval_Guard"
+    component_name: "Human_To_Approval"
+    type: "CRITERIA_GATE"
+    description: "Only allow approved UOWs to proceed"
+    config:
+      field: "approval_status"
+      operator: "EQ"
+      threshold: "APPROVED"
+    ai_context:
+      logic: "Only approved UOWs proceed to archival"
+
+  - name: "Archiver_Inbound_Guard"
+    component_name: "Archiver_From_Approval"
+    type: "PASS_THRU"
+    description: "Allows approved UOWs to Archiver"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Simple pass-through for archival"
+
+  - name: "Error_Routing_Guard"
+    component_name: "Error_From_Queue"
+    type: "PASS_THRU"
+    description: "Allows error handler to process failed UOWs"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Pass-through for error remediation"
+
+  - name: "Timeout_Routing_Guard"
+    component_name: "Timeout_From_Queue"
+    type: "PASS_THRU"
+    description: "Allows timeout manager to process stale UOWs"
+    config:
+      validation: "basic"
+    ai_context:
+      logic: "Pass-through for timeout handling"

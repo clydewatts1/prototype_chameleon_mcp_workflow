@@ -14,7 +14,7 @@ The Workflow Monitor Dashboard is a real-time control room for the Chameleon Wor
 
 ### 2. Key Metrics Dashboard (The "HUD")
 Real-time metrics displayed as large, easy-to-read cards:
-- **Active UOWs**: Total count of `IN_PROGRESS` + `PENDING` UOWs
+- **Active UOWs**: Total count of `ACTIVE` + `PENDING` UOWs
 - **Completed**: Total successfully completed UOWs
 - **Failed**: Total failed UOWs (displayed in red for critical alerts)
 - **Zombies**: UOWs with stale heartbeats (timeout detection)
@@ -32,7 +32,7 @@ Interactive workflow topology visualization using Graphviz:
 
 ### 4. Data Tables (The "Manifest")
 Three comprehensive data views:
-- **Active Work**: Table showing all `IN_PROGRESS` UOWs with:
+- **Active Work**: Table showing all `ACTIVE` UOWs with:
   - UOW ID (truncated)
   - Workflow name
   - Current interaction
@@ -44,7 +44,7 @@ Three comprehensive data views:
   - Interaction name
   - Count of pending UOWs
   
-- **History Log**: Latest 50 entries from `Instance_UOW_History` showing:
+- **History Log**: Latest 50 entries from `Interaction_Logs` showing:
   - Log ID
   - Timestamp
   - UOW ID

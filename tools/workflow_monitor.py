@@ -450,7 +450,7 @@ def render_metrics(metrics: Dict[str, int]):
         st.metric(
             label="🔄 Active UOWs",
             value=total_active,
-            help="Total IN_PROGRESS + PENDING UOWs",
+            help="Total ACTIVE + PENDING UOWs",
         )
 
     with col2:

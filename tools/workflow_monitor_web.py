@@ -492,7 +492,7 @@ def main():
         st.header("⚙️ Configuration")
 
         # Database connection
-        default_db = "sqlite:///chameleon_instance.db"
+        default_db = "sqlite:///instance.db"
         db_url = st.text_input(
             "Database Connection String",
             value=default_db,
@@ -654,7 +654,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--db-url",
         type=str,
-        default="sqlite:///chameleon_instance.db",
+        default="sqlite:///instance.db",
         help="Database connection URL",
     )
     args, unknown = parser.parse_known_args()

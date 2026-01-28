@@ -47,6 +47,7 @@ from database.models_instance import (
     UnitsOfWork,
 )
 from database.enums import UOWStatus, ComponentDirection
+from common.config import INSTANCE_DB_URL
 
 # Try to import tabulate for nice table formatting
 try:
@@ -367,8 +368,8 @@ def main():
     parser.add_argument(
         "--db-url",
         type=str,
-        default="sqlite:///chameleon_instance.db",
-        help="Database connection URL (default: sqlite:///chameleon_instance.db)",
+        default=INSTANCE_DB_URL,
+        help=f"Database connection URL (default: {INSTANCE_DB_URL})",
     )
     args = parser.parse_args()
 

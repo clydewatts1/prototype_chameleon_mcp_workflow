@@ -1,0 +1,58 @@
+workflow:
+  name: "Constitutional_Zero_Agent_Flow"
+  description: "A bare minimum workflow satisfying the Constitution without Beta agents. Relies on system timeouts for progression."
+  version: 1.0
+  ai_context:
+    goal: "Validate structural integrity and timeout protocols."
+    risk_level: "Low"
+
+  # Structural Roles Only (No BETA, HUMAN, AI_AGENT, AUTO)
+  roles:
+    - name: "Prime_Mover"
+      type: "ALPHA"
+      description: "Instantiates the Base Unit of Work."
+      ai_context: {"persona": "System Origin"}
+
+    - name: "The_End"
+      type: "OMEGA"
+      description: "Reconciles and archives the workflow."
+      ai_context: {"persona": "System Terminal"}
+
+    - name: "Entropy_Guard"
+      type: "TAU"
+      description: "Background service to claim stalled tokens."
+      ai_context: {"persona": "Timekeeper"}
+
+  interactions:
+    - name: "Stasis_Chamber"
+      description: "A holding area where UOWs wait for non-existent agents."
+
+  components:
+    # 1. Instantiation: Alpha creates the UOW and places it in Stasis
+    - role: "Prime_Mover"
+      interaction: "Stasis_Chamber"
+      direction: "OUTBOUND"
+      name: "Genesis_Outbound"
+
+    # 2. Timeout Path: Tau watches Stasis for stalled items (Simulating progression)
+    # Since no Beta agent will pick up the work, this trigger is guaranteed.
+    - role: "Entropy_Guard"
+      interaction: "Stasis_Chamber"
+      direction: "INBOUND"
+      name: "Timeout_Sweep"
+      guardian:
+        type: "STANDARD"
+        config: 
+          timeout_seconds: 5  # Short timeout for demo purposes
+
+    # 3. Finalization: Omega attempts to pull completed work
+    # Note: Under normal conditions, Cerberus blocks this until 'COMPLETED'.
+    # However, Tau's intervention (marking as TIMEOUT/FAILED) allows terminal processing.
+    - role: "The_End"
+      interaction: "Stasis_Chamber"
+      direction: "INBOUND"
+      name: "Terminal_Inbound"
+      guardian:
+        type: "CERBERUS"
+        config: 
+          synchronization: "strict_all_children"

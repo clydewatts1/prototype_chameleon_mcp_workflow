@@ -8,20 +8,25 @@ workflow:
 
   # Structural Roles Only (No BETA, HUMAN, AI_AGENT, AUTO)
   roles:
-    - name: "Prime_Mover"
+    - name: "Prime_Mover (ALPHA)"
       type: "ALPHA"
       description: "Instantiates the Base Unit of Work."
       ai_context: {"persona": "System Origin"}
 
-    - name: "The_End"
+    - name: "The_End (OMEGA)"
       type: "OMEGA"
       description: "Reconciles and archives the workflow."
       ai_context: {"persona": "System Terminal"}
 
-    - name: "Entropy_Guard"
+    - name: "Entropy_Guard (TAU)"
       type: "TAU"
       description: "Background service to claim stalled tokens."
       ai_context: {"persona": "Timekeeper"}
+
+    - name: "Remediator (EPSILON)"
+      type: "EPSILON"
+      description: "Handles error remediation and retry/compensation paths."
+      ai_context: {"persona": "System Physician"}
 
   interactions:
     - name: "Stasis_Chamber"
@@ -29,14 +34,14 @@ workflow:
 
   components:
     # 1. Instantiation: Alpha creates the UOW and places it in Stasis
-    - role: "Prime_Mover"
+    - role: "Prime_Mover (ALPHA)"
       interaction: "Stasis_Chamber"
       direction: "OUTBOUND"
       name: "Genesis_Outbound"
 
     # 2. Timeout Path: Tau watches Stasis for stalled items (Simulating progression)
     # Since no Beta agent will pick up the work, this trigger is guaranteed.
-    - role: "Entropy_Guard"
+    - role: "Entropy_Guard (TAU)"
       interaction: "Stasis_Chamber"
       direction: "INBOUND"
       name: "Timeout_Sweep"
@@ -45,10 +50,20 @@ workflow:
         config: 
           timeout_seconds: 5  # Short timeout for demo purposes
 
+    # EPSILON remediation inbound path (required: EPSILON INBOUND components must have guardians)
+    - role: "Remediator (EPSILON)"
+      interaction: "Stasis_Chamber"
+      direction: "INBOUND"
+      name: "Remedial_Inbound"
+      guardian:
+        type: "STANDARD"
+        config:
+          action: "retry_or_escalate"
+
     # 3. Finalization: Omega attempts to pull completed work
     # Note: Under normal conditions, Cerberus blocks this until 'COMPLETED'.
     # However, Tau's intervention (marking as TIMEOUT/FAILED) allows terminal processing.
-    - role: "The_End"
+    - role: "The_End (OMEGA)"
       interaction: "Stasis_Chamber"
       direction: "INBOUND"
       name: "Terminal_Inbound"

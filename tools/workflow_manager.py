@@ -221,13 +221,16 @@ class WorkflowManager:
             component_map: Dict[str, Template_Components] = {}
 
             # Create Roles
-            roles_data = yaml_data.get("roles", [])
+            # Support roles defined at top-level or nested under 'workflow'
+            roles_data = yaml_data.get("roles", []) or workflow_data.get("roles", [])
             for role_data in roles_data:
+                # Support either 'role_type' or legacy 'type' key in YAML
+                role_type_val = role_data.get("role_type") or role_data.get("type")
                 new_role = Template_Roles(
                     workflow_id=new_workflow.workflow_id,
                     name=role_data["name"],
                     description=role_data.get("description"),
-                    role_type=role_data["role_type"],
+                    role_type=role_type_val,
                     strategy=role_data.get("strategy"),
                     ai_context=role_data.get("ai_context"),
                     # child_workflow_id will be resolved in a second pass
@@ -236,7 +239,8 @@ class WorkflowManager:
                 role_map[new_role.name] = new_role
 
             # Create Interactions
-            interactions_data = yaml_data.get("interactions", [])
+            # Support interactions at top-level or nested under 'workflow'
+            interactions_data = yaml_data.get("interactions", []) or workflow_data.get("interactions", [])
             for interaction_data in interactions_data:
                 new_interaction = Template_Interactions(
                     workflow_id=new_workflow.workflow_id,
@@ -250,10 +254,15 @@ class WorkflowManager:
             session.flush()  # Ensure all roles and interactions have IDs
 
             # Create Components (with name-based resolution)
-            components_data = yaml_data.get("components", [])
+            # Support components at top-level or nested under 'workflow'
+            components_data = yaml_data.get("components", []) or workflow_data.get("components", [])
             for component_data in components_data:
-                role_name = component_data.get("role_name")
-                interaction_name = component_data.get("interaction_name")
+                # Support either 'role_name' or shorthand 'role'
+                role_name = component_data.get("role_name") or component_data.get("role")
+                # Support either 'interaction_name' or shorthand 'interaction'
+                interaction_name = (
+                    component_data.get("interaction_name") or component_data.get("interaction")
+                )
 
                 if role_name not in role_map:
                     raise ValueError(
@@ -276,10 +285,28 @@ class WorkflowManager:
                 session.add(new_component)
                 component_map[new_component.name] = new_component
 
+                # Ensure component has an ID before creating nested guardian
+                session.flush()
+
+                # If a guardian is nested under the component in YAML, create it now
+                nested_guardian = component_data.get("guardian")
+                if nested_guardian:
+                    new_guardian = Template_Guardians(
+                        workflow_id=new_workflow.workflow_id,
+                        component_id=new_component.component_id,
+                        name=nested_guardian.get("name") or f"{new_component.name}_guardian",
+                        description=nested_guardian.get("description"),
+                        type=nested_guardian.get("type") or nested_guardian.get("guardian_type"),
+                        config=nested_guardian.get("config"),
+                        ai_context=nested_guardian.get("ai_context"),
+                    )
+                    session.add(new_guardian)
+
             session.flush()  # Ensure all components have IDs
 
             # Create Guardians (with component name resolution)
-            guardians_data = yaml_data.get("guardians", [])
+            # Support guardians at top-level or nested under 'workflow'
+            guardians_data = yaml_data.get("guardians", []) or workflow_data.get("guardians", [])
             for guardian_data in guardians_data:
                 component_name = guardian_data.get("component_name")
 

@@ -1,0 +1,23 @@
+digraph "Constitutional_Zero_Agent_Flow" {
+  label="Constitutional_Zero_Agent_Flow";
+  labelloc="t";
+  node [fontname="Arial"];
+  edge [fontname="Arial"];
+
+  role_Entropy_Guard_(TAU) [label="Entropy_Guard (TAU)", shape=circle, style=filled, fillcolor=lightgray, color=purple, penwidth=3];
+  role_Prime_Mover_(ALPHA) [label="Prime_Mover (ALPHA)", shape=circle, style=filled, fillcolor=lightgray, color=green, penwidth=3];
+  role_Remediator_(EPSILON) [label="Remediator (EPSILON)", shape=circle, style=filled, fillcolor=lightgray, color=orange, penwidth=3];
+  role_The_End_(OMEGA) [label="The_End (OMEGA)", shape=circle, style=filled, fillcolor=lightgray, color=black, penwidth=3];
+  interaction_Stasis_Chamber [label="Stasis_Chamber", shape=hexagon, style=filled, fillcolor=lightgreen];
+  guardian_Remedial_Inbound_guardian [label="Remedial_Inbound_guardian", shape=doubleoctagon, style=filled, fillcolor=salmon];
+  guardian_Terminal_Inbound_guardian [label="Terminal_Inbound_guardian", shape=doubleoctagon, style=filled, fillcolor=salmon];
+  guardian_Timeout_Sweep_guardian [label="Timeout_Sweep_guardian", shape=doubleoctagon, style=filled, fillcolor=salmon];
+
+  role_Prime_Mover_(ALPHA) -> interaction_Stasis_Chamber [label="Genesis_Outbound"];
+  interaction_Stasis_Chamber -> guardian_Remedial_Inbound_guardian [label="Remedial_Inbound"];
+  guardian_Remedial_Inbound_guardian -> role_Remediator_(EPSILON);
+  interaction_Stasis_Chamber -> guardian_Terminal_Inbound_guardian [label="Terminal_Inbound"];
+  guardian_Terminal_Inbound_guardian -> role_The_End_(OMEGA);
+  interaction_Stasis_Chamber -> guardian_Timeout_Sweep_guardian [label="Timeout_Sweep"];
+  guardian_Timeout_Sweep_guardian -> role_Entropy_Guard_(TAU);
+}

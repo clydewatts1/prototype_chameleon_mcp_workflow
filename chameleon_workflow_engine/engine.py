@@ -14,7 +14,7 @@ References:
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from dateutil.parser import isoparse
@@ -43,6 +43,11 @@ from database.enums import (
     UOWStatus,
     ComponentDirection,
     GuardianType,
+)
+from chameleon_workflow_engine.dsl_evaluator import (
+    InteractionPolicyDSL,
+    DSLAttributeError,
+    extract_policy_conditions_from_guardian,
 )
 
 # Well-known system actor ID for automated operations
@@ -704,6 +709,264 @@ class ChameleonEngine:
 
         return context
 
+    def decompose_uow(
+        self,
+        session: Session,
+        parent_uow: UnitsOfWork,
+        role: Local_Roles,
+        child_count: int,
+    ) -> List[uuid.UUID]:
+        """
+        Decompose a Base UOW into Child UOWs (BETA Role Decomposition).
+        
+        Implements Article V.2: Processing Roles - BETA Decomposition.
+        Implements Article III.1: Attribute Inheritance (Global Blueprint only).
+        
+        Process:
+        1. Validate decomposition strategy (HOMOGENEOUS/HETEROGENEOUS)
+        2. Spawn child UOWs with parent_id FK
+        3. Copy Global Blueprint attributes (actor_id=NULL) from parent to children
+        4. Do NOT copy Personal Playbook (actor_id=specific)
+        5. Update parent's child_count field
+        6. Place children in first outbound interaction
+        
+        Args:
+            session: Database session
+            parent_uow: The Base UOW being decomposed
+            role: The Local_Roles record (contains strategy)
+            child_count: Number of children to create
+        
+        Returns:
+            List[UUID]: List of created child UOW IDs
+        
+        Raises:
+            ValueError: If strategy invalid or no outbound components
+        """
+        if child_count <= 0:
+            raise ValueError(f"child_count must be > 0, got {child_count}")
+        
+        strategy = role.decomposition_strategy
+        if strategy not in ("HOMOGENEOUS", "HETEROGENEOUS"):
+            raise ValueError(
+                f"Invalid decomposition strategy '{strategy}' for role {role.name}. "
+                f"Must be HOMOGENEOUS or HETEROGENEOUS."
+            )
+        
+        # Get Global Blueprint attributes (actor_id=NULL) to inherit
+        global_blueprint_attrs = (
+            session.query(Local_Role_Attributes)
+            .filter(
+                and_(
+                    Local_Role_Attributes.role_id == role.role_id,
+                    Local_Role_Attributes.actor_id.is_(None),  # Global Blueprint only
+                )
+            )
+            .all()
+        )
+        
+        # Get current parent attributes (latest versions)
+        parent_attrs = (
+            session.query(UOW_Attributes)
+            .filter(UOW_Attributes.uow_id == parent_uow.uow_id)
+            .order_by(UOW_Attributes.version.desc())
+            .all()
+        )
+        
+        # Build latest parent attributes (skip Personal Playbook)
+        parent_attr_map = {}
+        attr_versions = {}
+        for attr in parent_attrs:
+            if attr.key not in parent_attr_map:
+                parent_attr_map[attr.key] = attr.value
+                attr_versions[attr.key] = attr.version
+        
+        # Find first outbound interaction for children
+        outbound_components = (
+            session.query(Local_Components)
+            .filter(
+                and_(
+                    Local_Components.role_id == role.role_id,
+                    Local_Components.direction == ComponentDirection.OUTBOUND.value,
+                )
+            )
+            .all()
+        )
+        
+        if not outbound_components:
+            raise ValueError(
+                f"Role {role.name} has no OUTBOUND components. "
+                f"Cannot place decomposed children."
+            )
+        
+        # Use first outbound component's interaction
+        children_interaction_id = outbound_components[0].interaction_id
+        
+        # Create child UOWs
+        created_children = []
+        for i in range(child_count):
+            child_uow = UnitsOfWork(
+                uow_id=uuid.uuid4(),
+                instance_id=parent_uow.instance_id,
+                local_workflow_id=parent_uow.local_workflow_id,
+                parent_id=parent_uow.uow_id,  # Link to parent
+                current_interaction_id=children_interaction_id,
+                status=UOWStatus.PENDING.value,
+                child_count=0,  # Children have no children (unless recursive)
+                finished_child_count=0,
+                last_heartbeat=None,
+            )
+            session.add(child_uow)
+            session.flush()  # Get the UOW ID
+            
+            # Copy Global Blueprint attributes to child
+            for attr in parent_attrs:
+                # Only copy Global Blueprint (no actor_id restrictions on UOW attributes)
+                # UOW_Attributes don't have actor_id, they're tied to the UOW itself
+                child_attr = UOW_Attributes(
+                    attribute_id=uuid.uuid4(),
+                    uow_id=child_uow.uow_id,
+                    instance_id=child_uow.instance_id,
+                    key=attr.key,
+                    value=attr.value,
+                    version=1,  # First version for child
+                    actor_id=SYSTEM_ACTOR_ID,  # System copies attributes
+                    reasoning=f"Inherited from parent UOW {parent_uow.uow_id} (Global Blueprint)",
+                )
+                session.add(child_attr)
+            
+            created_children.append(child_uow.uow_id)
+            logger.debug(
+                f"Created child UOW {child_uow.uow_id} "
+                f"(parent={parent_uow.uow_id}, interaction={children_interaction_id})"
+            )
+        
+        # Update parent's child_count
+        parent_uow.child_count = child_count
+        
+        session.flush()
+        logger.info(
+            f"Decomposed UOW {parent_uow.uow_id} into {child_count} children "
+            f"using strategy {strategy}"
+        )
+        
+        return created_children
+
+    def _evaluate_interaction_policy(
+        self,
+        session: Session,
+        uow: UnitsOfWork,
+        outbound_components: List[Local_Components],
+    ) -> Optional[uuid.UUID]:
+        """
+        Evaluate interaction_policy conditions to determine next Interaction for UOW.
+        
+        Implements Article IX.1: Interaction Policy Evaluation (Guardian Responsibility).
+        
+        Process:
+        1. Build UOW attribute namespace (latest versions + reserved metadata)
+        2. For each OUTBOUND component:
+           - Check if it has a guardian with interaction_policy
+           - Evaluate policy condition against UOW attributes
+           - Return first matching component's target interaction
+        3. If no policy matches, return None (caller routes to EPSILON)
+        4. If no policies defined, return first component's target (fallback)
+        
+        Args:
+            session: Database session
+            uow: The Unit of Work being routed
+            outbound_components: List of OUTBOUND components from the role
+        
+        Returns:
+            UUID of next Interaction, or None if no policy matches
+        """
+        if not outbound_components:
+            logger.warning(f"No OUTBOUND components for UOW {uow.uow_id}")
+            return None
+        
+        # Build UOW attribute namespace: latest versions of all attributes
+        latest_attrs = {}
+        attr_versions = {}
+        
+        all_attrs = (
+            session.query(UOW_Attributes)
+            .filter(UOW_Attributes.uow_id == uow.uow_id)
+            .order_by(UOW_Attributes.version.desc())
+            .all()
+        )
+        
+        for attr in all_attrs:
+            if attr.key not in latest_attrs:
+                latest_attrs[attr.key] = attr.value
+                attr_versions[attr.key] = attr.version
+        
+        # Add reserved metadata to namespace
+        eval_context = {
+            **latest_attrs,
+            "uow_id": str(uow.uow_id),
+            "child_count": uow.child_count or 0,
+            "finished_child_count": uow.finished_child_count or 0,
+            "status": uow.status,
+            "parent_id": str(uow.parent_id) if uow.parent_id else None,
+        }
+        
+        # Evaluate policy for each component
+        has_any_policy = False
+        for component in outbound_components:
+            # Get guardians for this component
+            guardians = (
+                session.query(Local_Guardians)
+                .filter(Local_Guardians.component_id == component.component_id)
+                .all()
+            )
+            
+            for guardian in guardians:
+                if not guardian.attributes:
+                    continue
+                
+                # Extract policy conditions from guardian
+                policy = guardian.attributes.get("interaction_policy")
+                if not policy or not policy.get("branches"):
+                    continue
+                
+                has_any_policy = True
+                branches = policy.get("branches", [])
+                
+                # Evaluate each branch condition
+                for branch in branches:
+                    condition = branch.get("condition")
+                    if not condition:
+                        continue
+                    
+                    try:
+                        if InteractionPolicyDSL.evaluate_condition(condition, eval_context):
+                            logger.debug(
+                                f"Policy matched for UOW {uow.uow_id}: "
+                                f"condition '{condition}' -> interaction {component.interaction_id}"
+                            )
+                            return component.interaction_id
+                    except (DSLAttributeError, ValueError) as e:
+                        logger.error(f"Policy evaluation error for UOW {uow.uow_id}: {e}")
+                        # Continue to next branch on evaluation error
+                        continue
+        
+        # Fallback logic
+        if has_any_policy:
+            # A policy was defined but no condition matched -> route to EPSILON
+            logger.warning(
+                f"No policy condition matched for UOW {uow.uow_id} "
+                f"with {len(outbound_components)} OUTBOUND component(s). "
+                f"No fallback defined in policy."
+            )
+            return None
+        else:
+            # No policy defined -> use first OUTBOUND component (sequential)
+            first_component = outbound_components[0]
+            logger.debug(
+                f"No interaction_policy for UOW {uow.uow_id}. "
+                f"Using first OUTBOUND component: {first_component.component_id} -> {first_component.interaction_id}"
+            )
+            return first_component.interaction_id
+
     def checkout_work(
         self, actor_id: uuid.UUID, role_id: uuid.UUID
     ) -> Optional[Dict[str, Any]]:
@@ -1077,6 +1340,49 @@ class ChameleonEngine:
                 except Exception as learning_error:
                     # Log the error but don't fail the submission
                     logger.warning(f"Learning loop failed for UOW {uow_id}: {learning_error}")
+
+                # Step 3.6: Evaluate Interaction Policy (Article IX.1)
+                # Get the role that currently has this UOW (inbound to the role)
+                # Then find its outbound components to determine next interaction
+                try:
+                    inbound_component = session.query(Local_Components).filter(
+                        and_(
+                            Local_Components.interaction_id == uow.current_interaction_id,
+                            Local_Components.direction == ComponentDirection.INBOUND.value
+                        )
+                    ).first()
+                    
+                    if inbound_component:
+                        # Get all outbound components from this role
+                        outbound_components = session.query(Local_Components).filter(
+                            and_(
+                                Local_Components.role_id == inbound_component.role_id,
+                                Local_Components.direction == ComponentDirection.OUTBOUND.value
+                            )
+                        ).all()
+                        
+                        if outbound_components:
+                            next_interaction_id = self._evaluate_interaction_policy(
+                                session=session,
+                                uow=uow,
+                                outbound_components=outbound_components,
+                            )
+                            
+                            if next_interaction_id:
+                                # Update UOW to next interaction for subsequent processing
+                                uow.current_interaction_id = next_interaction_id
+                                logger.debug(
+                                    f"UOW {uow_id} routed by interaction_policy "
+                                    f"to interaction {next_interaction_id}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Interaction policy evaluation failed for UOW {uow_id}. "
+                                    f"UOW will be marked COMPLETED; manual routing required."
+                                )
+                except Exception as policy_error:
+                    # Log but don't fail submission
+                    logger.warning(f"Interaction policy evaluation failed for UOW {uow_id}: {policy_error}")
 
                 # Step 4: Update UOW Status to COMPLETED
                 uow.status = UOWStatus.COMPLETED.value

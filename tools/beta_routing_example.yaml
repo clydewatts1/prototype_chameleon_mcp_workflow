@@ -1,0 +1,216 @@
+# ============================================================================
+# Beta Routing Example Workflow
+# ============================================================================
+# This example demonstrates a BETA role with multiple OUTBOUND components
+# and attribute-driven interaction_policy for Logic-Blind routing.
+#
+# Scenario: Invoice Processing Workflow
+# - ALPHA: Receives invoice, extracts metadata (amount, vendor, risk_score)
+# - BETA: Decomposes invoice into line items and assigns risk routing
+# - OUTBOUND: Branches to either Critical_Queue (high risk) or Standard_Queue (low risk)
+# - Guardian: Uses interaction_policy DSL to evaluate risk_score attribute
+# - OMEGA: Reconciles approved line items
+#
+# Key Features:
+# - Demonstrates Article IX.1 (Interaction Policy Evaluation)
+# - Shows Article III.1 (Global Blueprint attribute inheritance to children)
+# - Validates Article V.2 (BETA decomposition strategy)
+# - Enforces R12 (multi-OUTBOUND requires interaction_policy)
+# ============================================================================
+
+workflow:
+  name: Invoice_Approval_Logic_Blind
+  description: >
+    Demonstrates Logic-Blind BETA role architecture with attribute-driven routing
+    via interaction_policy. BETA decomposes invoice into line items and emits
+    risk_score attribute for Guardian-driven branching to critical or standard
+    processing queues.
+  version: 1
+
+roles:
+  - name: Invoice_Receiver
+    type: ALPHA
+    description: >
+      Origin role. Receives invoice documents and extracts metadata.
+      Emits global attributes for inheritance by child BETA processes.
+  
+  - name: Invoice_Processor
+    type: BETA
+    description: >
+      Decomposer role. Breaks invoice into line items and evaluates risk.
+      Logic-Blind: Only emits decomposition data and risk_score.
+      Guardian-layer interaction_policy routes to Critical or Standard queue.
+    strategy: HOMOGENEOUS
+    # Article V.2: BETA role must specify decomposition strategy
+    # HOMOGENEOUS = all children have same type/structure
+  
+  - name: Invoice_Reviewer
+    type: OMEGA
+    description: >
+      Terminal role. Reconciles line item processing results
+      and produces final approval decision.
+  
+  - name: Invoice_ErrorHandler
+    type: EPSILON
+    description: >
+      Physician role. Handles processing errors and remediation.
+  
+  - name: TimeoutManager
+    type: TAU
+    description: >
+      Chronometer role. Manages timeout scenarios.
+
+interactions:
+  - name: Receive_Invoices
+    description: >
+      Initial interaction. Receives invoice documents from upstream system.
+  
+  - name: Decompose_Invoices
+    description: >
+      Processing interaction. Decomposes invoice into line items.
+  
+  - name: Critical_Review
+    description: >
+      High-risk processing queue. For invoices with risk_score > 0.8.
+  
+  - name: Standard_Review
+    description: >
+      Standard processing queue. For invoices with risk_score <= 0.8.
+  
+  - name: Reconcile_Results
+    description: >
+      Final interaction. Reconciles all line item results.
+  
+  - name: Handle_Errors
+    description: >
+      Error handling interaction. Manages processing failures.
+
+components:
+  # ALPHA: Invoice_Receiver emits invoice metadata
+  - name: Receive_Invoice_Input
+    role: Invoice_Receiver
+    interaction: Receive_Invoices
+    direction: OUTBOUND
+    description: >
+      ALPHA OUTBOUND component. Receives invoice documents.
+      Emits attributes: invoice_id, vendor_id, amount, risk_score.
+
+  # BETA: Invoice_Processor receives invoice and decomposes
+  - name: Process_Invoice_Inbound
+    role: Invoice_Processor
+    interaction: Decompose_Invoices
+    direction: INBOUND
+    description: >
+      BETA INBOUND component. Receives invoice from ALPHA.
+      Inherits global attributes: risk_score from parent.
+
+  # BETA: Invoice_Processor emits to two different queues (requires interaction_policy)
+  - name: Send_Critical_Queue
+    role: Invoice_Processor
+    interaction: Critical_Review
+    direction: OUTBOUND
+    description: >
+      BETA OUTBOUND component (1/2) for high-risk invoices.
+      interaction_policy will route here when risk_score > 0.8.
+
+  - name: Send_Standard_Queue
+    role: Invoice_Processor
+    interaction: Standard_Review
+    direction: OUTBOUND
+    description: >
+      BETA OUTBOUND component (2/2) for standard invoices.
+      interaction_policy will route here when risk_score <= 0.8.
+
+  # Critical Review: Invoice_Reviewer receives high-risk invoice
+  - name: Receive_Critical_Invoice
+    role: Invoice_Reviewer
+    interaction: Critical_Review
+    direction: INBOUND
+    description: >
+      OMEGA INBOUND component. Receives high-risk invoices.
+
+  # Standard Review: Invoice_Reviewer receives standard invoice
+  - name: Receive_Standard_Invoice
+    role: Invoice_Reviewer
+    interaction: Standard_Review
+    direction: INBOUND
+    description: >
+      OMEGA INBOUND component. Receives standard invoices.
+
+  # OMEGA: Invoice_Reviewer emits reconciliation
+  - name: Emit_Approval_Decision
+    role: Invoice_Reviewer
+    interaction: Reconcile_Results
+    direction: OUTBOUND
+    description: >
+      OMEGA OUTBOUND component. Emits final approval decision.
+
+  # Terminal: Reconciliation sink
+  - name: Final_Reconciliation_Sink
+    role: Invoice_Reviewer
+    interaction: Reconcile_Results
+    direction: INBOUND
+    description: >
+      OMEGA INBOUND component (terminal). Receives final reconciliation.
+
+  # EPSILON: Error handling
+  - name: Handle_Processing_Error
+    role: Invoice_ErrorHandler
+    interaction: Handle_Errors
+    direction: INBOUND
+    description: >
+      EPSILON INBOUND component. Receives error notifications.
+
+  - name: Emit_Error_Resolution
+    role: Invoice_ErrorHandler
+    interaction: Handle_Errors
+    direction: OUTBOUND
+    description: >
+      EPSILON OUTBOUND component. Emits remediation actions.
+
+guardians:
+  # Guardian for Critical_Review: Routes high-risk invoices
+  - name: CriticalRouteGuard
+    type: CERBERUS
+    component: Send_Critical_Queue
+    description: >
+      Article IX.1 Guardian with interaction_policy DSL.
+      Routes to Critical_Review when risk_score > 0.8.
+    attributes:
+      interaction_policy:
+        branches:
+          - condition: "risk_score > 0.8"
+            next_interaction: "Critical_Review"
+  
+  # Guardian for Standard_Review: Routes standard-risk invoices
+  - name: StandardRouteGuard
+    type: CERBERUS
+    component: Send_Standard_Queue
+    description: >
+      Article IX.1 Guardian with interaction_policy DSL.
+      Routes to Standard_Review when risk_score <= 0.8.
+    attributes:
+      interaction_policy:
+        branches:
+          - condition: "risk_score <= 0.8"
+            next_interaction: "Standard_Review"
+  
+  # Guardian for Omega reconciliation: Cerberus synchronization
+  - name: OmegaReconciliationGuard
+    type: CERBERUS
+    component: Final_Reconciliation_Sink
+    description: >
+      Article VI (Cerberus Mandate) Guardian for OMEGA INBOUND.
+      Ensures all child work completes before reconciliation.
+    attributes:
+      cerberus_strategy: "ALL_COMPLETE"
+      required_child_count: null  # Dynamic: depends on decomposition
+
+  # Guardian for error handling
+  - name: ErrorHandlingGuard
+    type: PASS_THRU
+    component: Handle_Processing_Error
+    description: >
+      Article XI.1 (The Ate Guard) Guardian for EPSILON INBOUND.
+      Pass-through validation for error scenarios.
+    attributes: {}

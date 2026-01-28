@@ -33,6 +33,11 @@ from database.models_template import (
     Template_Guardians,
 )
 from common.config import TEMPLATE_DB_URL
+from chameleon_workflow_engine.dsl_evaluator import (
+    validate_interaction_policy_rules,
+    DSLSyntaxError,
+    DSLAttributeError,
+)
 
 
 class WorkflowManager:
@@ -563,6 +568,91 @@ class WorkflowManager:
                     f"Violation of Article V & VII: OMEGA role must have at least one INBOUND "
                     f"component. Found: {omega_inbound_count}"
                 )
+        
+        # R11: BETA Roles With Interaction Policy Must Have Valid DSL Syntax
+        # This rule validates that any interaction_policy defined on a Guardian
+        # attached to a BETA role's OUTBOUND component has syntactically valid DSL
+        for beta_role in beta_roles:
+            # Get OUTBOUND components for this BETA role
+            beta_outbound_components = components_by_role.get(
+                beta_role.role_id, {}
+            ).get("OUTBOUND", [])
+            
+            for component in beta_outbound_components:
+                # Check for guardians on this component
+                component_guardians = guardians_by_component.get(component.component_id, [])
+                
+                for guardian in component_guardians:
+                    # Check if guardian has interaction_policy attributes
+                    if guardian.attributes and isinstance(guardian.attributes, dict):
+                        interaction_policy = guardian.attributes.get("interaction_policy")
+                        
+                        if interaction_policy and isinstance(interaction_policy, dict):
+                            # Extract policy conditions (branches array with condition field)
+                            branches = interaction_policy.get("branches", [])
+                            policy_conditions = []
+                            
+                            for branch in branches:
+                                if isinstance(branch, dict) and "condition" in branch:
+                                    policy_conditions.append(branch["condition"])
+                            
+                            # Validate DSL syntax and attributes
+                            if policy_conditions:
+                                # Get permitted attributes (UOW_Attributes only, no actor_id)
+                                # For validation purposes, we allow UOW_Attributes to be named generically
+                                # Actual attribute validation happens at runtime
+                                permitted_attributes = {
+                                    "uow_id", "parent_id", "status", "child_count", 
+                                    "finished_child_count", "current_interaction_id",
+                                    # Allow any attribute key that could be in UOW_Attributes
+                                    # The safe namespace at runtime enforces isolation
+                                }
+                                
+                                try:
+                                    validate_interaction_policy_rules(
+                                        policy_conditions,
+                                        permitted_attributes
+                                    )
+                                except (DSLSyntaxError, DSLAttributeError) as e:
+                                    raise ValueError(
+                                        f"Violation of Article IX.1 & R11: BETA role '{beta_role.name}' "
+                                        f"has Guardian with invalid DSL in interaction_policy: {str(e)}"
+                                    )
+        
+        # R12: BETA Roles With Multiple OUTBOUND Components Must Have Interaction Policy
+        # This rule enforces that if a BETA role has more than one OUTBOUND component,
+        # it must define interaction_policy to disambiguate routing
+        for beta_role in beta_roles:
+            # Get OUTBOUND components for this BETA role
+            beta_outbound_components = components_by_role.get(
+                beta_role.role_id, {}
+            ).get("OUTBOUND", [])
+            
+            # R12 only applies if there are multiple OUTBOUND components
+            if len(beta_outbound_components) > 1:
+                # Check if any OUTBOUND component has a Guardian with interaction_policy
+                has_interaction_policy = False
+                
+                for component in beta_outbound_components:
+                    component_guardians = guardians_by_component.get(component.component_id, [])
+                    
+                    for guardian in component_guardians:
+                        if guardian.attributes and isinstance(guardian.attributes, dict):
+                            if "interaction_policy" in guardian.attributes:
+                                has_interaction_policy = True
+                                break
+                    
+                    if has_interaction_policy:
+                        break
+                
+                # Enforce the requirement
+                if not has_interaction_policy:
+                    raise ValueError(
+                        f"Violation of Article IX.1 & R12: BETA role '{beta_role.name}' has "
+                        f"{len(beta_outbound_components)} OUTBOUND components but no interaction_policy "
+                        f"defined. Per Constitutional Article IX.1, multi-outcome BETA roles must define "
+                        f"attribute-driven branching via interaction_policy to disambiguate routing."
+                    )
 
     def delete_workflow(self, workflow_name: str) -> bool:
         """

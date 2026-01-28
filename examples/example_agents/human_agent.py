@@ -6,6 +6,21 @@ This agent demonstrates human-in-the-loop processing in the Chameleon system.
 It polls for work from the "Human_Approver" role, displays UOW attributes to the
 console, prompts the user for an approval decision, and submits the result.
 
+LOGIC-BLIND ARCHITECTURE
+========================
+Per Article V.2 & IX.1 (Workflow Constitution), this agent implements a Logic-Blind
+BETA role pattern: it emits only decision attributes without internal routing logic.
+Routing decisions are made by the Guardian layer via interaction_policy DSL evaluation.
+
+BETA Attributes Emitted (Human Decision):
+  - human_decision: User's approval decision ("APPROVE" or "REJECT")
+  - human_reasoning: User's reasoning for the decision
+  - human_decision_metadata: Metadata (actor_id, timestamp, feedback)
+
+Routing Decision: Made by Guardian's interaction_policy on OUTBOUND components,
+  NOT by this agent. The agent trusts the Guardian to route based on BETA attributes
+  (e.g., route to Approved_Queue if human_decision == "APPROVE", else Rejection_Queue).
+
 Usage:
     python examples/human_agent.py --base-url http://localhost:8000
     python examples/human_agent.py --role-id <UUID> --actor-id <UUID>

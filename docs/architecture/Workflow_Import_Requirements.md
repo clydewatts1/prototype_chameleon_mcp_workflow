@@ -202,6 +202,83 @@ ASSERT omega_inbound_count >= 1
 
 ---
 
+### R11: BETA Roles With Interaction Policy Must Have Valid DSL Syntax
+**Constitutional Reference**: Article V.2 - Processing Roles, Article IX.1 - Interaction Policy Evaluation
+
+**Description**: Any BETA role with an `interaction_policy` field defined in its associated Guardian(s) must have valid Domain Specific Language (DSL) syntax. The policy conditions must use only permitted Python comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`) and logical operators (`and`, `or`, `not`). All referenced attributes must be either UOW_Attributes keys or reserved metadata (`uow_id`, `child_count`, `finished_child_count`, `status`, `parent_id`).
+
+**Validation Logic**:
+```python
+FOR EACH role WHERE role_type = 'BETA':
+    FOR EACH guardian WHERE role_id = role.id AND guardian.attributes.interaction_policy IS NOT NULL:
+        policy_conditions = guardian.attributes.interaction_policy
+        FOR EACH condition IN policy_conditions:
+            # Validate syntax
+            ASSERT condition.syntax_is_valid()  # Parentheses balanced, operators recognized
+            # Validate attribute references
+            FOR EACH attribute_reference IN condition.get_referenced_attributes():
+                ASSERT attribute_reference IN (uow_attributes_keys ∪ reserved_metadata)
+```
+
+**Error Message**: 
+```
+"Violation of Article V.2 & IX.1: BETA role '{role_name}' Guardian '{guardian_name}' has invalid interaction_policy: {error_detail}. Syntax must use Python operators (<, >, <=, >=, ==, !=) and logical operators (and, or, not). Referenced attributes must be UOW_Attributes or reserved metadata (uow_id, child_count, finished_child_count, status, parent_id)."
+```
+
+**Example Valid Policies**:
+- `"risk_score > 8"`
+- `"amount >= 1000 and not is_flagged"`
+- `"child_count <= 5 and status == 'CREATED'"`
+
+**Example Invalid Policies**:
+- `"invalid_attribute > 10"` — attribute not in permitted set
+- `"call_function(x)"` — function calls not permitted
+- `"actor_id == 'user@example.com'"` — actor_id not exposed for isolation
+- `"amount >> 100"` — invalid operator
+
+---
+
+### R12: BETA Roles With Multiple OUTBOUND Components Must Have Interaction Policy
+**Constitutional Reference**: Article V.2 - Processing Roles, Article IX - Guard as Aggregator and Dispatcher
+
+**Description**: If a BETA role has more than one OUTBOUND component (enabling multi-outcome routing), it must define an `interaction_policy` in at least one associated Guardian on those OUTBOUND components. This ensures that routing decisions are explicit and documented, preventing silent or ambiguous routing behavior. A BETA role with exactly one OUTBOUND component may omit `interaction_policy` (single path is implicit).
+
+**Validation Logic**:
+```python
+FOR EACH role WHERE role_type = 'BETA':
+    outbound_components = GET components WHERE role_id = role.id AND direction = 'OUTBOUND'
+    IF COUNT(outbound_components) > 1:
+        # Multiple outcomes require explicit policy
+        has_policy = FALSE
+        FOR EACH component IN outbound_components:
+            FOR EACH guardian WHERE component_id = component.id:
+                IF guardian.attributes.interaction_policy IS NOT NULL:
+                    has_policy = TRUE
+                    BREAK
+            IF has_policy:
+                BREAK
+        ASSERT has_policy == TRUE
+```
+
+**Error Message**: 
+```
+"Violation of Article V.2: BETA role '{role_name}' has {outbound_count} OUTBOUND components and must define an interaction_policy in a Guardian to specify routing logic. Use interaction_policy field with conditions like 'risk_score > 8' to route to different Interaction queues."
+```
+
+**Example Scenario**:
+- BETA role `Invoice_Analyzer` has 2 OUTBOUND components:
+  - Component A → `High_Risk_Queue` (for risky invoices)
+  - Component B → `Standard_Queue` (for normal invoices)
+- Must define `interaction_policy` with condition: `"risk_score > 8"` in Component A's Guardian and default fallback in Component B's Guardian
+- Without policy: validation fails at import time
+
+**Backward Compatibility**:
+- Single OUTBOUND component: no policy required (auto-routes to that component)
+- Multiple OUTBOUND components: policy required (explicit design)
+- Existing workflows with 1 OUTBOUND: no changes needed
+
+---
+
 ## Implementation Guidelines
 
 ### Validation Sequence

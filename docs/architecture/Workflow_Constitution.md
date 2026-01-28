@@ -21,6 +21,17 @@ This document establishes the fundamental laws governing the interaction between
 2. **The Personal Playbook**: WorkflowRoleAttribute (Actor-Role specific long-term memory).  
 3. **The Global Blueprint**: WorkflowRoleAttribute (Role-wide shared memory, context=GLOBAL).
 
+### **3.1 Attribute Inheritance During Beta Decomposition**
+
+When a **Beta () Role** decomposes a Base UOW into Child UOWs, attribute inheritance follows strict isolation rules to enforce **Article I (Total Isolation)**:
+
+1. **Global Blueprint Inheritance (actor_id=NULL)**: Child UOWs automatically inherit all Global Blueprint attributes from their parent Base UOW. These are shared knowledge assets applicable to all actors assigned to the decomposing role.
+   * Example: `validation_rules`, `business_logic_version`, `workflow_context`
+2. **Personal Playbook Non-Inheritance (actor_id=specific)**: Child UOWs do **NOT** inherit Personal Playbook attributes from the parent's assigned actor. This prevents context leakage if the child's assigned actor differs from the parent's actor.
+   * Rationale: Protects Article I isolation boundary; each actor builds their own Personal Playbook through independent decisions.
+3. **Versioning**: Inherited attributes maintain their version lineage from parent, enabling traceability (Article XVII).
+4. **Explicit Attribute Copy Rules**: If specific parent attributes must be available to children (beyond Global Blueprint), they must be explicitly configured in the role's `decomposition_template` and marked as "transferable." This enables intentional context propagation while preventing unintended leakage.
+
 ## **ARTICLE IV: Interaction Dynamics**
 
 1. **Holding Areas**: The **Interaction** is the primary holding area for UOWs.  
@@ -77,6 +88,24 @@ The **Cerberus Guard** prevents "Zombie Parents" from reaching Omega by enforcin
 2. **Outbound Dispatching (Direction)**:  
    * **Post-Processing Wait**: The Guard waits until a complete set has finished processing before dispatching.  
    * **Directional Filtering**: Routes UOW sets to next interactions based on specific attribute results.
+
+### **9.1 Interaction Policy Evaluation (Guardian Responsibility)**
+
+When a role (particularly **Beta ()** roles) completes processing and produces output attributes that determine routing (e.g., risk_score, approval_level), the **Guardian** evaluates a **Policy Condition** using a custom Domain Specific Language (DSL) to determine the next Interaction destination:
+
+1. **Policy Definition**: Each Guardian attached to a component's OUTBOUND direction may define an `interaction_policy` field containing conditional rules using standard Python comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`) and logical operators (`and`, `or`, `not`).
+   * Example: `"risk_score > 8 and not is_flagged"`
+   * Policy conditions evaluate only against **UOW_Attributes** (latest versions) plus reserved metadata (`uow_id`, `child_count`, `finished_child_count`, `status`, `parent_id`).
+2. **Safe Evaluation Context**: Policy expressions are evaluated in a restricted namespace with no access to:
+   * Engine internals or helper functions
+   * Actor identity (`actor_id`) — preserves Article I isolation
+   * Global variables or Python builtins
+3. **Topology Constraint**: A policy can only route to OUTBOUND components that are explicitly defined in the workflow topology. Policies cannot invent new routing paths outside the bipartite graph (Article IV).
+4. **Multi-Outcome Routing**: If a role has multiple OUTBOUND components with different policy conditions, the Guardian evaluates each condition in sequence and routes the UOW set to the first matching component. If no policy matches, the UOW is routed to Epsilon (error path).
+5. **Validation**: Interaction policies are validated at **workflow import time** (before instance creation) to ensure:
+   * Syntax is valid (parentheses balanced, operators recognized)
+   * Referenced attributes are permitted (UOW_Attributes or reserved metadata)
+   * All conditions reference attributes that are logically available in context
 
 ## **ARTICLE XI: Fault Tolerance and Resilience Paths**
 

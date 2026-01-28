@@ -6,6 +6,20 @@ This agent demonstrates automated deterministic processing in the Chameleon syst
 It polls for work from the "Auto_Calculator" role, performs a deterministic calculation
 based on the AI summary, and submits the result.
 
+LOGIC-BLIND ARCHITECTURE
+========================
+Per Article V.2 & IX.1 (Workflow Constitution), this agent implements a Logic-Blind
+BETA role pattern: it emits only computation results without internal routing logic.
+Routing decisions are made by the Guardian layer via interaction_policy DSL evaluation.
+
+BETA Attributes Emitted (Calculated Score from Analysis):
+  - auto_score: Calculated score based on summary length and keywords
+  - score_metadata: Metadata about the calculation (base, bonus, penalty values)
+
+Routing Decision: Made by Guardian's interaction_policy on OUTBOUND components,
+  NOT by this agent. The agent trusts the Guardian to route based on BETA attributes
+  (e.g., route to High_Priority if auto_score > 800, else Standard_Queue).
+
 Usage:
     python examples/auto_agent.py --base-url http://localhost:8000
     python examples/auto_agent.py --role-id <UUID> --actor-id <UUID>

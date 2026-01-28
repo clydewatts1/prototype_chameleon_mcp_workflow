@@ -6,6 +6,19 @@ This agent demonstrates AI-powered processing using Ollama in the Chameleon syst
 It polls for work from the "AI_Analyzer" role, calls the Ollama API to generate
 a summary of the input text, and submits the result.
 
+LOGIC-BLIND ARCHITECTURE
+========================
+Per Article V.2 & IX.1 (Workflow Constitution), this agent implements a Logic-Blind
+BETA role pattern: it emits only computation results without internal routing logic.
+Routing decisions are made by the Guardian layer via interaction_policy DSL evaluation.
+
+BETA Attributes Emitted (Result of AI Analysis):
+  - ai_summary: Generated text summary from Ollama LLM
+  - analysis_metadata: Metadata about the analysis (model, lengths, actor_id)
+
+Routing Decision: Made by Guardian's interaction_policy on OUTBOUND components,
+  NOT by this agent. The agent trusts the Guardian to route based on BETA attributes.
+
 Prerequisites:
     - Ollama installed and running locally: https://ollama.ai
     - Model downloaded: ollama pull llama3 (or your preferred model)

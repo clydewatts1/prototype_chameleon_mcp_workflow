@@ -1,0 +1,74 @@
+# Invalid Workflow - BETA role without strategy
+# This workflow violates R5: All BETA roles must have valid strategy
+
+workflow:
+  name: "Invalid_Beta_No_Strategy"
+  description: "Workflow with BETA role missing strategy - should fail validation"
+  version: 1
+
+  roles:
+    - name: "Creator"
+      role_type: "ALPHA"
+      description: "Origin role"
+
+    - name: "Processor"
+      role_type: "BETA"
+      # Missing strategy field!
+      description: "Processing role without strategy"
+
+    - name: "Finalizer"
+      role_type: "OMEGA"
+      description: "Terminal role"
+
+    - name: "Error_Handler"
+      role_type: "EPSILON"
+      description: "Error handling"
+
+    - name: "Timeout_Manager"
+      role_type: "TAU"
+      description: "Timeout management"
+
+  interactions:
+    - name: "Creation_Queue"
+      description: "Creation queue"
+
+    - name: "Process_Queue"
+      description: "Processing queue"
+
+    - name: "Final_Queue"
+      description: "Final queue"
+
+    - name: "Error_Queue"
+      description: "Error queue"
+
+  components:
+    - name: "Creator_To_Process"
+      role: "Creator"
+      interaction: "Creation_Queue"
+      direction: "OUTBOUND"
+
+    - name: "Processor_From_Creation"
+      role: "Processor"
+      interaction: "Creation_Queue"
+      direction: "INBOUND"
+
+    - name: "Processor_To_Final"
+      role: "Processor"
+      interaction: "Process_Queue"
+      direction: "OUTBOUND"
+
+    - name: "Finalizer_From_Queue"
+      role: "Finalizer"
+      interaction: "Process_Queue"
+      direction: "INBOUND"
+      guardian:
+        name: "Cerberus_Guard"
+        type: "CERBERUS"
+
+    - name: "Error_From_Queue"
+      role: "Error_Handler"
+      interaction: "Error_Queue"
+      direction: "INBOUND"
+      guardian:
+        name: "Error_Guard"
+        type: "PASS_THRU"

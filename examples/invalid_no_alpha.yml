@@ -1,0 +1,51 @@
+# Invalid Workflow - Missing ALPHA Role
+# This workflow violates R1: Must have exactly one ALPHA role
+
+workflow:
+  name: "Invalid_No_Alpha"
+  description: "Workflow missing ALPHA role - should fail validation"
+  version: 1
+
+  roles:
+    - name: "Processor"
+      role_type: "BETA"
+      strategy: "HOMOGENEOUS"
+      description: "Processing role"
+
+    - name: "Finalizer"
+      role_type: "OMEGA"
+      description: "Terminal role"
+
+    - name: "Error_Handler"
+      role_type: "EPSILON"
+      description: "Error handling"
+
+    - name: "Timeout_Manager"
+      role_type: "TAU"
+      description: "Timeout management"
+
+  interactions:
+    - name: "Process_Queue"
+      description: "Processing queue"
+
+    - name: "Final_Queue"
+      description: "Final queue"
+
+  components:
+    - name: "Processor_From_Queue"
+      role: "Processor"
+      interaction: "Process_Queue"
+      direction: "INBOUND"
+
+    - name: "Processor_To_Final"
+      role: "Processor"
+      interaction: "Final_Queue"
+      direction: "OUTBOUND"
+
+    - name: "Finalizer_From_Queue"
+      role: "Finalizer"
+      interaction: "Final_Queue"
+      direction: "INBOUND"
+      guardian:
+        name: "Cerberus_Guard"
+        type: "CERBERUS"

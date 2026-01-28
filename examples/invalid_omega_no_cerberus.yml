@@ -1,0 +1,77 @@
+# Invalid Workflow - OMEGA component without CERBERUS guardian
+# This workflow violates R9: OMEGA INBOUND component must have CERBERUS guardian
+
+workflow:
+  name: "Invalid_Omega_No_Cerberus"
+  description: "Workflow with OMEGA missing CERBERUS guardian - should fail validation"
+  version: 1
+
+  roles:
+    - name: "Creator"
+      role_type: "ALPHA"
+      description: "Origin role"
+
+    - name: "Processor"
+      role_type: "BETA"
+      strategy: "HOMOGENEOUS"
+      description: "Processing role"
+
+    - name: "Finalizer"
+      role_type: "OMEGA"
+      description: "Terminal role"
+
+    - name: "Error_Handler"
+      role_type: "EPSILON"
+      description: "Error handling"
+
+    - name: "Timeout_Manager"
+      role_type: "TAU"
+      description: "Timeout management"
+
+  interactions:
+    - name: "Creation_Queue"
+      description: "Creation queue"
+
+    - name: "Final_Queue"
+      description: "Final queue"
+
+    - name: "Error_Queue"
+      description: "Error queue"
+
+  components:
+    - name: "Creator_To_Creation"
+      role: "Creator"
+      interaction: "Creation_Queue"
+      direction: "OUTBOUND"
+
+    - name: "Processor_From_Creation"
+      role: "Processor"
+      interaction: "Creation_Queue"
+      direction: "INBOUND"
+
+    - name: "Processor_To_Final"
+      role: "Processor"
+      interaction: "Final_Queue"
+      direction: "OUTBOUND"
+
+    # OMEGA INBOUND component missing CERBERUS guardian
+    - name: "Finalizer_From_Queue"
+      role: "Finalizer"
+      interaction: "Final_Queue"
+      direction: "INBOUND"
+      guardian:
+        name: "Wrong_Guard_Type"
+        type: "PASS_THRU"  # Should be CERBERUS!
+
+    - name: "Processor_To_Error"
+      role: "Processor"
+      interaction: "Error_Queue"
+      direction: "OUTBOUND"
+
+    - name: "Error_From_Queue"
+      role: "Error_Handler"
+      interaction: "Error_Queue"
+      direction: "INBOUND"
+      guardian:
+        name: "Error_Guard"
+        type: "PASS_THRU"

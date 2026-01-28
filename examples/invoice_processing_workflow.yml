@@ -1,0 +1,153 @@
+# Complete Invoice Processing Workflow
+# This example demonstrates all Constitutional requirements:
+# - 1 ALPHA role (Invoice_Creator)
+# - 1 OMEGA role (Invoice_Reconciler)
+# - 1 EPSILON role (Error_Handler)
+# - 1 TAU role (Timeout_Manager)
+# - BETA roles with valid strategies
+# - Proper component directionality
+# - Guardian requirements (Ate Guard, Cerberus Mandate)
+# - Interaction flow integrity
+
+workflow:
+  name: "Invoice_Processing"
+  description: "End-to-end invoice processing workflow with error handling and timeout management"
+  version: 1
+  ai_context: "This workflow orchestrates invoice creation, validation, approval, and reconciliation."
+
+  roles:
+    - name: "Invoice_Creator"
+      role_type: "ALPHA"
+      description: "Creates the base invoice UOW and initiates processing"
+      ai_context: "The origin role that instantiates new invoice processing workflows"
+
+    - name: "Invoice_Validator"
+      role_type: "BETA"
+      strategy: "HOMOGENEOUS"
+      description: "Validates invoice data and decomposes into line items"
+      ai_context: "Performs data validation and creates child UOWs for each line item"
+
+    - name: "Senior_Approver"
+      role_type: "BETA"
+      strategy: "HETEROGENEOUS"
+      description: "Routes to different approval paths based on amount"
+      ai_context: "Handles approval routing with diverse child UOW types"
+
+    - name: "Invoice_Reconciler"
+      role_type: "OMEGA"
+      description: "Final reconciliation and completion of invoice processing"
+      ai_context: "The terminal role that verifies all child UOWs are complete"
+
+    - name: "Error_Handler"
+      role_type: "EPSILON"
+      description: "Handles explicit data errors and remediation"
+      ai_context: "The physician role that remediates data failures through the Ate Path"
+
+    - name: "Timeout_Manager"
+      role_type: "TAU"
+      description: "Manages stale tokens and zombie actor detection"
+      ai_context: "The chronometer role that handles timeout scenarios"
+
+  interactions:
+    - name: "Validation_Queue"
+      description: "Holds invoices waiting for validation"
+      ai_context: "Interaction between creator and validator"
+
+    - name: "Approval_Queue"
+      description: "Holds validated invoices awaiting approval"
+      ai_context: "Interaction between validator and approver"
+
+    - name: "Reconciliation_Queue"
+      description: "Holds approved invoices for final reconciliation"
+      ai_context: "Interaction between approver and reconciler"
+
+    - name: "Error_Queue"
+      description: "Holds failed items for error remediation"
+      ai_context: "Interaction for the Ate Path (error handling)"
+
+    - name: "Timeout_Queue"
+      description: "Holds stale tokens requiring timeout management"
+      ai_context: "Interaction for handling expired or stale UOWs"
+
+  components:
+    # ALPHA outbound flow
+    - name: "Create_To_Validation"
+      role: "Invoice_Creator"
+      interaction: "Validation_Queue"
+      direction: "OUTBOUND"
+      description: "Routes new invoices from creator to validation queue"
+
+    # Validator inbound/outbound
+    - name: "Validator_From_Queue"
+      role: "Invoice_Validator"
+      interaction: "Validation_Queue"
+      direction: "INBOUND"
+      description: "Validator pulls invoices from validation queue"
+
+    - name: "Validator_To_Approval"
+      role: "Invoice_Validator"
+      interaction: "Approval_Queue"
+      direction: "OUTBOUND"
+      description: "Validator sends validated invoices to approval"
+
+    - name: "Validator_To_Error"
+      role: "Invoice_Validator"
+      interaction: "Error_Queue"
+      direction: "OUTBOUND"
+      description: "Validator routes failed items to error queue"
+
+    # Approver inbound/outbound
+    - name: "Approver_From_Queue"
+      role: "Senior_Approver"
+      interaction: "Approval_Queue"
+      direction: "INBOUND"
+      description: "Approver pulls items from approval queue"
+
+    - name: "Approver_To_Reconciliation"
+      role: "Senior_Approver"
+      interaction: "Reconciliation_Queue"
+      direction: "OUTBOUND"
+      description: "Approver sends approved items to reconciliation"
+
+    - name: "Approver_To_Error"
+      role: "Senior_Approver"
+      interaction: "Error_Queue"
+      direction: "OUTBOUND"
+      description: "Approver routes rejected items to error queue"
+
+    # OMEGA inbound flow (with Cerberus guardian - R9)
+    - name: "Reconciler_From_Queue"
+      role: "Invoice_Reconciler"
+      interaction: "Reconciliation_Queue"
+      direction: "INBOUND"
+      description: "Reconciler pulls completed items for final processing"
+      guardian:
+        name: "Cerberus_Reconciliation_Guard"
+        type: "CERBERUS"
+        description: "Three-headed check: Base UOW present, all children returned, all complete"
+        ai_context: "Enforces Article VI - The Cerberus Synchronization"
+
+    # EPSILON inbound flow (with guardian - R8 Ate Guard requirement)
+    - name: "Error_From_Queue"
+      role: "Error_Handler"
+      interaction: "Error_Queue"
+      direction: "INBOUND"
+      description: "Error handler pulls failed items from error queue"
+      guardian:
+        name: "Ate_Guard"
+        type: "PASS_THRU"
+        description: "Filters errors before remediation"
+        ai_context: "Enforces Article XI.1 - The Ate Path (Explicit Data Error)"
+
+    - name: "Error_To_Timeout"
+      role: "Error_Handler"
+      interaction: "Timeout_Queue"
+      direction: "OUTBOUND"
+      description: "Error handler escalates irrecoverable errors to timeout"
+
+    # TAU inbound flow
+    - name: "Timeout_From_Queue"
+      role: "Timeout_Manager"
+      interaction: "Timeout_Queue"
+      direction: "INBOUND"
+      description: "Timeout manager pulls stale tokens"

@@ -99,3 +99,38 @@ class UOWStatus(str, Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+
+# ============================================================================
+# Phase 3: Guard-Persistence Integration - Exception Classes
+# ============================================================================
+
+class ConstitutionalViolation(Exception):
+    """
+    Base exception for Constitutional violations.
+    
+    Raised when the Chameleon Workflow Constitution is violated.
+    Implements Article I (The Guard's Mandate) enforcement.
+    """
+    pass
+
+
+class GuardLayerBypassException(ConstitutionalViolation):
+    """
+    Raised when Article I, Section 3 (Guard Mandate) is violated.
+    
+    Indicates that a UOW operation attempted to bypass Guard authorization.
+    The Guard acts as the supreme filter - no UOW state transition occurs
+    without Guard approval.
+    """
+    pass
+
+
+class GuardStateDriftException(ConstitutionalViolation):
+    """
+    Raised when Article XVII (Atomic Traceability) State Drift is detected.
+    
+    Indicates that a UOW's content_hash does not match its current attributes,
+    suggesting unauthorized modification or system corruption.
+    """
+    pass

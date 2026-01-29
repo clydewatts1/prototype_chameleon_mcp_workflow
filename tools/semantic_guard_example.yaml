@@ -1,0 +1,323 @@
+# ============================================================================
+# Semantic Guard Example Workflow
+# ============================================================================
+# Demonstrates attribute-driven branching using complex expressions,
+# custom functions, error handling, and state verification.
+#
+# Scenario: Advanced Invoice Processing with Risk Scoring & Multi-Factor Routing
+# - ALPHA: Receives invoice, computes preliminary risk metrics
+# - BETA: Decomposes invoice into line items, emits advanced scoring metrics
+# - OUTBOUND Branching: Multiple pathways based on arithmetic expressions
+#   * Critical Path: High risk + large amount
+#   * Review Path: Medium risk or flagged vendors
+#   * Fast Path: Low risk + automated vendor
+#   * Error Handler: Evaluation failures
+# - OMEGA: Reconciles with decision record
+#
+# Key Semantic Guard Features:
+# - Complex arithmetic expressions: ((score * weight) + offset) / divisor > threshold
+# - Custom functions: normalize_score(x), is_trusted_vendor(id)
+# - Boolean logic: (condition1 and condition2) or condition3
+# - Error handling: on_error branch for evaluation failures
+# - State verification: X-Content-Hash prevents UOW drift
+# - Silent failure: Errors logged, next branch attempted automatically
+# ============================================================================
+
+workflow:
+  name: Advanced_Invoice_Processing_Semantic_Guard
+  description: >
+    Demonstrates Semantic Guard with complex branching logic, custom functions,
+    arithmetic expressions, and error handling. BETA emits multiple attributes
+    for multi-factor routing decisions.
+  version: 1
+
+roles:
+  - name: Invoice_Receiver
+    type: ALPHA
+    description: >
+      Origin role. Receives invoice documents and computes preliminary risk metrics.
+      Emits: invoice_id, amount, vendor_id, preliminary_risk_score
+
+  - name: Advanced_Processor
+    type: BETA
+    description: >
+      Processor role. Decomposes invoice and computes advanced scoring metrics.
+      Logic-Blind: Emits only computed attributes (no routing logic).
+      Guardian-layer Semantic Guard evaluates complex branching policy.
+    strategy: HOMOGENEOUS
+
+  - name: Invoice_Reconciler
+    type: OMEGA
+    description: >
+      Terminal role. Reconciles processing results and produces final decision.
+
+  - name: Invoice_ErrorHandler
+    type: EPSILON
+    description: >
+      Physician role. Handles Semantic Guard evaluation errors and edge cases.
+
+  - name: TimeoutManager
+    type: TAU
+    description: >
+      Chronometer role. Manages timeout scenarios.
+
+interactions:
+  - name: Receive_Invoices
+    description: Initial interaction for invoice receipt
+  
+  - name: Process_Advanced
+    description: Advanced decomposition and scoring
+  
+  - name: Critical_Review
+    description: High-risk or high-value path
+  
+  - name: Review_Queue
+    description: Medium-risk or flagged vendor path
+  
+  - name: Fast_Track
+    description: Low-risk, trusted vendor path
+  
+  - name: Error_Adjudication
+    description: Manual review for evaluation errors
+  
+  - name: Reconcile
+    description: Final reconciliation
+
+components:
+  # ALPHA: Emit preliminary metrics
+  - name: Receive_Invoice_Input
+    role: Invoice_Receiver
+    interaction: Receive_Invoices
+    direction: OUTBOUND
+    description: >
+      Receives invoice and computes preliminary risk_score.
+      Emits: invoice_id, amount, vendor_id, preliminary_risk_score, vendor_history
+
+  # BETA: Receive from ALPHA, decompose, emit advanced metrics
+  - name: Process_Invoice_Inbound
+    role: Advanced_Processor
+    interaction: Process_Advanced
+    direction: INBOUND
+    description: >
+      BETA INBOUND. Receives invoice from ALPHA.
+      Inherits global attributes from ALPHA.
+
+  # BETA: Three OUTBOUND components for multi-outcome routing
+  - name: Route_Critical_Path
+    role: Advanced_Processor
+    interaction: Critical_Review
+    direction: OUTBOUND
+    description: >
+      BETA OUTBOUND (1/3) for high-risk high-value invoices.
+      Semantic Guard routes here based on complex arithmetic condition.
+
+  - name: Route_Review_Path
+    role: Advanced_Processor
+    interaction: Review_Queue
+    direction: OUTBOUND
+    description: >
+      BETA OUTBOUND (2/3) for medium-risk or flagged vendors.
+      Semantic Guard routes here based on multi-factor Boolean conditions.
+
+  - name: Route_Fast_Track
+    role: Advanced_Processor
+    interaction: Fast_Track
+    direction: OUTBOUND
+    description: >
+      BETA OUTBOUND (3/3) for low-risk trusted vendors.
+      Semantic Guard routes here when all risk factors are low.
+
+  # Terminal: Three inbound paths converge to reconciliation
+  - name: Receive_Critical_Invoice
+    role: Invoice_Reconciler
+    interaction: Critical_Review
+    direction: INBOUND
+    description: OMEGA INBOUND for critical-path invoices
+
+  - name: Receive_Review_Invoice
+    role: Invoice_Reconciler
+    interaction: Review_Queue
+    direction: INBOUND
+    description: OMEGA INBOUND for review-queue invoices
+
+  - name: Receive_Fast_Track_Invoice
+    role: Invoice_Reconciler
+    interaction: Fast_Track
+    direction: INBOUND
+    description: OMEGA INBOUND for fast-track invoices
+
+  - name: Emit_Final_Decision
+    role: Invoice_Reconciler
+    interaction: Reconcile
+    direction: OUTBOUND
+    description: OMEGA OUTBOUND with final decision record
+
+  - name: Final_Reconciliation_Sink
+    role: Invoice_Reconciler
+    interaction: Reconcile
+    direction: INBOUND
+    description: OMEGA INBOUND (terminal) for reconciliation
+
+  # EPSILON: Error handling
+  - name: Handle_Evaluation_Error
+    role: Invoice_ErrorHandler
+    interaction: Error_Adjudication
+    direction: INBOUND
+    description: >
+      EPSILON INBOUND. Receives UOWs that failed evaluation in Semantic Guard.
+
+  - name: Emit_Error_Resolution
+    role: Invoice_ErrorHandler
+    interaction: Error_Adjudication
+    direction: OUTBOUND
+    description: EPSILON OUTBOUND with error remediation decision
+
+guardians:
+  # Guardian for Critical_Review: Complex arithmetic condition
+  - name: CriticalRiskGuard
+    type: CERBERUS
+    component: Route_Critical_Path
+    description: >
+      Routes to Critical_Review when:
+      - (risk_score * 10 + amount_factor) / 2 > 8  (normalized risk-value score)
+      - AND flagged_by_system OR high_priority
+      
+      Uses custom function normalize_score() for advanced risk calculation.
+      Arithmetic expression demonstrates precision and bracket precedence.
+    attributes:
+      interaction_policy:
+        branches:
+          # Branch 1: Complex arithmetic - high risk and high value
+          - condition: >
+              ((risk_score * 10) + (amount / 10000)) / 2 > 8
+              and (flagged_by_system or priority_level == 'HIGH')
+            action: "proceed"
+            next_interaction: "Critical_Review"
+
+  # Guardian for Review_Queue: Medium-risk or flagged vendors
+  - name: MediumRiskGuard
+    type: CERBERUS
+    component: Route_Review_Path
+    description: >
+      Routes to Review_Queue when:
+      - medium risk (4 < score <= 8)
+      - OR vendor flagged but not critical
+      - OR first-time vendor (vendor_history check)
+      
+      Demonstrates Boolean logic and multi-condition decision tree.
+    attributes:
+      interaction_policy:
+        branches:
+          # Branch 2: Medium risk and/or flagged
+          - condition: >
+              (risk_score > 4 and risk_score <= 8)
+              or (flagged_by_system and priority_level != 'HIGH')
+              or (vendor_history < 3)
+            action: "proceed"
+            next_interaction: "Review_Queue"
+
+  # Guardian for Fast_Track: Low-risk trusted vendors
+  - name: FastTrackGuard
+    type: CERBERUS
+    component: Route_Fast_Track
+    description: >
+      Routes to Fast_Track when:
+      - risk_score <= 4 (low risk)
+      - AND vendor_history >= 3 (trusted vendor)
+      - AND amount <= threshold
+      - AND not flagged by system
+      
+      Demonstrates multiple Boolean conditions (all must be true).
+    attributes:
+      interaction_policy:
+        branches:
+          # Branch 3: Low risk and trusted vendor and low amount
+          - condition: >
+              risk_score <= 4
+              and vendor_history >= 3
+              and amount <= 50000
+              and not flagged_by_system
+            action: "proceed"
+            next_interaction: "Fast_Track"
+
+  # Guardian for Error_Adjudication: on_error handler
+  - name: ErrorHandlerGuard
+    type: PASS_THRU
+    component: Handle_Evaluation_Error
+    description: >
+      Error handling branch triggered by Semantic Guard when:
+      - Any previous branch evaluation fails (undefined variable, syntax error)
+      - or division by zero
+      - or invalid operation on attribute type
+      
+      Silent Failure Protocol ensures this branch is attempted if earlier evaluations fail.
+      Errors are logged to Shadow Logger with full context.
+      
+      Example failures captured:
+      - undefined_metric: AttributeError
+      - divide by zero: ZeroDivisionError
+      - type mismatch: TypeError
+    attributes:
+      on_error_handler: true
+      next_interaction: "Error_Adjudication"
+
+  # Guardian for fallback: default branch if no conditions match
+  - name: FallbackGuard
+    type: PASS_THRU
+    component: Route_Fast_Track  # Default to Fast_Track if all else fails
+    description: >
+      Fallback/default branch ensures every UOW reaches a destination.
+      Triggered if no other branch conditions match (safety mechanism).
+    attributes:
+      is_default: true
+      next_interaction: "Fast_Track"
+
+  # Guardian for OMEGA: Cerberus synchronization
+  - name: OmegaSynchronizer
+    type: CERBERUS
+    component: Final_Reconciliation_Sink
+    description: >
+      Article VI (Cerberus Mandate). Ensures all children complete before reconciliation.
+      Verifies state hash to detect any drift during processing.
+    attributes:
+      cerberus_strategy: "ALL_COMPLETE"
+      verify_state_hash: true
+
+# ============================================================================
+# Documentation: Semantic Guard Features Used
+# ============================================================================
+#
+# 1. ARITHMETIC EXPRESSIONS:
+#    - ((risk_score * 10) + (amount / 10000)) / 2 > 8
+#    - Operators: +, -, *, /, precedence with parentheses
+#
+# 2. BOOLEAN LOGIC:
+#    - (condition1 and condition2) or condition3
+#    - Operators: and, or, not
+#    - Complex nesting with parentheses
+#
+# 3. UNIVERSAL FUNCTIONS:
+#    - abs(), min(), max(), round(), floor(), ceil()
+#    - Example: max(score, previous_score) < 0.3
+#
+# 4. CUSTOM FUNCTIONS (extensible):
+#    - normalize_score(value): Normalize to 0-1 range
+#    - is_trusted_vendor(vendor_id): Boolean check
+#    - Register at runtime via semantic_guard.register_custom_function()
+#
+# 5. ERROR HANDLING:
+#    - on_error: true  - Branch triggered only if previous evaluations failed
+#    - Silent Failure Protocol: Errors logged, execution continues
+#    - Shadow Logger: Full error context captured (type, message, variables)
+#
+# 6. STATE VERIFICATION:
+#    - X-Content-Hash: Computed before evaluation
+#    - Detects UOW drift (attributes modified during processing)
+#    - Verification optional but recommended for critical workflows
+#
+# 7. FALLBACK MECHANISMS:
+#    - default: true  - Branch used if no conditions match (safety exit)
+#    - Ensures every UOW reaches a terminal node
+#    - Prevents orphaned work items
+#
+# ============================================================================

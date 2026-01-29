@@ -49,6 +49,11 @@ from chameleon_workflow_engine.dsl_evaluator import (
     DSLAttributeError,
     extract_policy_conditions_from_guardian,
 )
+from chameleon_workflow_engine.semantic_guard import (
+    SemanticGuard,
+    StateVerifier,
+    evaluate_interaction_policy_with_guard,
+)
 
 # Well-known system actor ID for automated operations
 # This ensures consistent identity across all system-initiated operations
@@ -856,25 +861,32 @@ class ChameleonEngine:
         session: Session,
         uow: UnitsOfWork,
         outbound_components: List[Local_Components],
+        use_semantic_guard: bool = True,
     ) -> Optional[uuid.UUID]:
         """
         Evaluate interaction_policy conditions to determine next Interaction for UOW.
         
         Implements Article IX.1: Interaction Policy Evaluation (Guardian Responsibility).
+        Supports both simple DSL policies and advanced Semantic Guard expressions.
         
         Process:
         1. Build UOW attribute namespace (latest versions + reserved metadata)
-        2. For each OUTBOUND component:
+        2. Compute X-Content-Hash for state verification
+        3. For each OUTBOUND component:
            - Check if it has a guardian with interaction_policy
+           - Route through Semantic Guard if enabled (supports arithmetic, custom functions)
+           - Fall back to simple DSL if Semantic Guard disabled or not supported
            - Evaluate policy condition against UOW attributes
            - Return first matching component's target interaction
-        3. If no policy matches, return None (caller routes to EPSILON)
-        4. If no policies defined, return first component's target (fallback)
+        4. Handle errors with Silent Failure Protocol and on_error branches
+        5. Use default branch if no conditions match
+        6. Return None if no match and no default/error handler
         
         Args:
             session: Database session
             uow: The Unit of Work being routed
             outbound_components: List of OUTBOUND components from the role
+            use_semantic_guard: Enable Semantic Guard for advanced expressions (default: True)
         
         Returns:
             UUID of next Interaction, or None if no policy matches
@@ -909,6 +921,139 @@ class ChameleonEngine:
             "parent_id": str(uow.parent_id) if uow.parent_id else None,
         }
         
+        # Compute state hash for verification
+        state_hash = StateVerifier.compute_hash(eval_context)
+        
+        # If Semantic Guard enabled, use enhanced routing logic
+        if use_semantic_guard:
+            return self._evaluate_with_semantic_guard(
+                session=session,
+                uow=uow,
+                outbound_components=outbound_components,
+                eval_context=eval_context,
+                state_hash=state_hash,
+            )
+        
+        # Fallback to simple DSL evaluation
+        return self._evaluate_with_simple_dsl(
+            session=session,
+            uow=uow,
+            outbound_components=outbound_components,
+            eval_context=eval_context,
+        )
+    
+    def _evaluate_with_semantic_guard(
+        self,
+        session: Session,
+        uow: UnitsOfWork,
+        outbound_components: List[Local_Components],
+        eval_context: Dict[str, Any],
+        state_hash: str,
+    ) -> Optional[uuid.UUID]:
+        """
+        Evaluate interaction_policy using Semantic Guard (advanced expressions).
+        
+        Supports:
+        - Arithmetic: +, -, *, /, %
+        - Boolean logic: and, or, not
+        - Universal functions: abs(), min(), max(), round(), floor(), pow(), sqrt()
+        - Custom functions: registered domain-specific functions
+        - Error handling: on_error and default branches
+        - State verification: X-Content-Hash detection of UOW drift
+        
+        Args:
+            session: Database session
+            uow: The Unit of Work
+            outbound_components: OUTBOUND components for routing
+            eval_context: Attribute context for evaluation
+            state_hash: Current state hash for verification
+        
+        Returns:
+            UUID of next Interaction, or None if no match
+        """
+        guard = SemanticGuard()
+        
+        # Try Semantic Guard evaluation for each component
+        for component in outbound_components:
+            guardians = (
+                session.query(Local_Guardians)
+                .filter(Local_Guardians.component_id == component.component_id)
+                .all()
+            )
+            
+            for guardian in guardians:
+                if not guardian.attributes:
+                    continue
+                
+                # Extract policy from guardian attributes
+                policy = guardian.attributes.get("interaction_policy")
+                if not policy or not policy.get("branches"):
+                    continue
+                
+                # Evaluate policy with Semantic Guard
+                result = guard.evaluate_policy(
+                    policy=policy,
+                    uow_attributes=eval_context,
+                    uow_id=str(uow.uow_id),
+                    verify_hash=state_hash,
+                )
+                
+                # Check result
+                if result.success:
+                    # Log the routing decision
+                    logger.debug(
+                        f"Semantic Guard routed UOW {uow.uow_id} "
+                        f"via branch {result.matched_branch_index}: "
+                        f"{result.next_interaction} (action: {result.action})"
+                    )
+                    
+                    # Find interaction by name
+                    interaction = (
+                        session.query(Local_Interactions)
+                        .filter(Local_Interactions.name == result.next_interaction)
+                        .first()
+                    )
+                    
+                    if interaction:
+                        return interaction.interaction_id
+                else:
+                    # Policy evaluation failed
+                    logger.error(
+                        f"Semantic Guard evaluation failed for UOW {uow.uow_id}: "
+                        f"{'; '.join(result.evaluation_errors)}"
+                    )
+                    # Continue to next component
+                    continue
+        
+        # No policy matched and no Semantic Guard result
+        logger.warning(
+            f"No interaction_policy matched for UOW {uow.uow_id} "
+            f"with {len(outbound_components)} OUTBOUND component(s)."
+        )
+        return None
+    
+    def _evaluate_with_simple_dsl(
+        self,
+        session: Session,
+        uow: UnitsOfWork,
+        outbound_components: List[Local_Components],
+        eval_context: Dict[str, Any],
+    ) -> Optional[uuid.UUID]:
+        """
+        Evaluate interaction_policy using simple DSL (backward compatibility).
+        
+        Supports only basic comparisons and Boolean logic (no arithmetic).
+        Used when Semantic Guard is disabled or for backward compatibility.
+        
+        Args:
+            session: Database session
+            uow: The Unit of Work
+            outbound_components: OUTBOUND components for routing
+            eval_context: Attribute context for evaluation
+        
+        Returns:
+            UUID of next Interaction, or None if no match
+        """
         # Evaluate policy for each component
         has_any_policy = False
         for component in outbound_components:
@@ -940,7 +1085,7 @@ class ChameleonEngine:
                     try:
                         if InteractionPolicyDSL.evaluate_condition(condition, eval_context):
                             logger.debug(
-                                f"Policy matched for UOW {uow.uow_id}: "
+                                f"Simple DSL policy matched for UOW {uow.uow_id}: "
                                 f"condition '{condition}' -> interaction {component.interaction_id}"
                             )
                             return component.interaction_id

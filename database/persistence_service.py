@@ -34,6 +34,7 @@ from database.models_instance import (
 )
 from database.enums import GuardLayerBypassException, GuardStateDriftException
 from chameleon_workflow_engine.semantic_guard import StateVerifier
+from chameleon_workflow_engine.stream_broadcaster import emit
 
 
 @dataclass
@@ -603,6 +604,163 @@ class UOWPersistenceService:
         except Exception as e:
             result["error"] = str(e)
             result["blocked_by"] = "GUARD_EXCEPTION"
+
+        return result
+
+    @staticmethod
+    def save_uow_with_park_notify(
+        session: Session,
+        uow: UnitsOfWork,
+        guard_context: GuardContext,
+        new_status: str,
+        new_interaction_id: uuid.UUID,
+        actor_id: Optional[uuid.UUID] = None,
+        reasoning: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        high_risk_transitions: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Save UOW with Park & Notify pattern for high-risk transitions (NON-BLOCKING).
+        
+        Implements the Park & Notify pattern per Constitutional Article XV (Pilot Sovereignty):
+        When a high-risk transition is detected, the UOW is immediately:
+        1. Transitioned to PENDING_PILOT_APPROVAL (parked in DB)
+        2. An InterventionRequest event is emitted to StreamBroadcaster
+        3. Returns successfully without blocking
+        4. The workflow thread terminates cleanly
+        
+        Pilot then has up to 5 minutes (via UnitsOfWork heartbeat timeout) to review
+        the parked UOW and either:
+        - Call /pilot/resume/{uow_id} to approve → ACTIVE
+        - Call /pilot/cancel/{uow_id} to reject → FAILED
+        
+        If no Pilot action taken within 5 minutes, the Zombie Sweeper will
+        move it to ZOMBIED_SOFT (per UOW Lifecycle Specs).
+        
+        This implementation:
+        - Does NOT block the workflow thread
+        - Does NOT use timeout loops or polling
+        - DOES persist the parked UOW to DB immediately
+        - DOES emit a clear audit trail for dashboard monitoring
+        
+        Args:
+            session: SQLAlchemy session
+            uow: The UOW to save
+            guard_context: REQUIRED. Guard context for pilot communication
+            new_status: The target status (should be one of high_risk_transitions)
+            new_interaction_id: The target interaction
+            actor_id: Optional actor responsible for change
+            reasoning: Optional explanation
+            metadata: Optional additional context
+            high_risk_transitions: List of statuses requiring pilot approval
+                                 (default: ["COMPLETED", "FAILED"])
+        
+        Returns:
+            Dict with keys:
+            - success (bool): Always True if no exception
+            - parked (bool): Whether UOW was parked (True if high-risk, False if normal save)
+            - status (str): New UOW status (PENDING_PILOT_APPROVAL if high-risk)
+            - intervention_request_id (Optional[str]): ID of emitted intervention request
+            - message (str): Human-readable description
+            - uow (UnitsOfWork): The saved UOW
+            - error (Optional[str]): Error message if operation failed
+        
+        Constitutional Reference: Article XV (Pilot Sovereignty), UOW Lifecycle Specs
+        
+        Raises:
+            GuardLayerBypassException: If Guard authorization fails
+        """
+        if high_risk_transitions is None:
+            high_risk_transitions = ["COMPLETED", "FAILED"]
+
+        result = {
+            "success": False,
+            "parked": False,
+            "status": new_status,
+            "intervention_request_id": None,
+            "message": "",
+            "uow": None,
+            "error": None,
+        }
+
+        try:
+            # Check if this is a high-risk transition
+            is_high_risk = new_status in high_risk_transitions
+
+            if is_high_risk:
+                # PARK: Transition UOW to PENDING_PILOT_APPROVAL (Park state)
+                parked_uow = UOWPersistenceService.save_uow(
+                    session=session,
+                    uow=uow,
+                    guard_context=guard_context,
+                    new_status="PENDING_PILOT_APPROVAL",  # Park state (not the original target)
+                    new_interaction_id=new_interaction_id,
+                    actor_id=actor_id,
+                    reasoning=f"PARK: {reasoning}" if reasoning else "PARK: High-risk transition requires Pilot approval",
+                    metadata={
+                        **(metadata or {}),
+                        "original_target_status": new_status,
+                        "park_reason": reasoning or "High-risk transition",
+                        "parked_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
+                # NOTIFY: Emit InterventionRequest event to StreamBroadcaster
+                intervention_request_id = str(uuid.uuid4())
+                emit(
+                    "intervention_request",
+                    {
+                        "intervention_request_id": intervention_request_id,
+                        "uow_id": str(uow.uow_id),
+                        "instance_id": str(uow.instance_id),
+                        "status": "PENDING_PILOT_APPROVAL",
+                        "original_target_status": new_status,
+                        "reason": reasoning or "High-risk transition",
+                        "actor_id": str(actor_id) if actor_id else None,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "pilot_action_required": True,
+                        "pilot_options": ["resume", "cancel"],
+                        "timeout_seconds": 300,  # 5 minutes
+                    }
+                )
+
+                result["success"] = True
+                result["parked"] = True
+                result["status"] = "PENDING_PILOT_APPROVAL"
+                result["intervention_request_id"] = intervention_request_id
+                result["message"] = (
+                    f"UOW {uow.uow_id} parked for Pilot approval. "
+                    f"Original target: {new_status}. Awaiting /pilot/resume or /pilot/cancel."
+                )
+                result["uow"] = parked_uow
+
+            else:
+                # NORMAL SAVE: Not high-risk, proceed normally with auto_increment
+                saved_uow = UOWPersistenceService.save_uow(
+                    session=session,
+                    uow=uow,
+                    guard_context=guard_context,
+                    new_status=new_status,
+                    new_interaction_id=new_interaction_id,
+                    actor_id=actor_id,
+                    reasoning=reasoning,
+                    metadata=metadata,
+                )
+
+                result["success"] = True
+                result["parked"] = False
+                result["status"] = new_status
+                result["message"] = f"UOW {uow.uow_id} saved with status {new_status}."
+                result["uow"] = saved_uow
+
+        except GuardLayerBypassException as e:
+            result["success"] = False
+            result["error"] = str(e)
+            raise
+        except Exception as e:
+            result["success"] = False
+            result["error"] = str(e)
+            raise
 
         return result
 

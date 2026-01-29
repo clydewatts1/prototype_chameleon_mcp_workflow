@@ -34,7 +34,7 @@ Example:
 
 from typing import Dict, Optional, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Response
+from fastapi import FastAPI, HTTPException, Depends, Response, Request
 from pydantic import BaseModel
 from loguru import logger
 import asyncio
@@ -43,6 +43,11 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from database import DatabaseManager, UnitsOfWork
 from chameleon_workflow_engine.engine import ChameleonEngine
+from chameleon_workflow_engine.pilot_interface import PilotInterface
+from chameleon_workflow_engine.jwt_utils import (
+    JWTValidator, JWTConfig, PilotToken, InvalidTokenError, MissingTokenError
+)
+from chameleon_workflow_engine.rbac import PilotAuthContext, InsufficientPermissionsError
 from common.config import TEMPLATE_DB_URL, INSTANCE_DB_URL
 
 # Initialize database manager (will be configured on startup)
@@ -236,6 +241,74 @@ class MarkMemoryToxicResponse(BaseModel):
     message: str
 
 
+# ===== Pilot Interface Models (Article XV - Pilot Sovereignty) =====
+
+
+class PilotKillSwitchRequest(BaseModel):
+    """Model for Pilot kill switch intervention"""
+
+    instance_id: str
+    reason: str
+
+
+class PilotKillSwitchResponse(BaseModel):
+    """Response for kill switch - all UOWs paused"""
+
+    success: bool
+    message: str
+    paused_uow_count: int
+
+
+class PilotClarificationRequest(BaseModel):
+    """Model for Pilot clarification submission (break ambiguity lock)"""
+
+    text: str
+
+
+class PilotClarificationResponse(BaseModel):
+    """Response for clarification - UOW resumed from ZOMBIED_SOFT"""
+
+    success: bool
+    message: str
+    new_status: str
+
+
+class PilotWaiverRequest(BaseModel):
+    """Model for Pilot waiver of Constitutional rule violation"""
+
+    reason: str
+
+
+class PilotWaiverResponse(BaseModel):
+    """Response for waiver - UOW resumed from PAUSED"""
+
+    success: bool
+    message: str
+    waiver_logged: bool
+
+
+class PilotResumeResponse(BaseModel):
+    """Response for Pilot approval of high-risk transition"""
+
+    success: bool
+    message: str
+    new_status: str
+
+
+class PilotCancelRequest(BaseModel):
+    """Model for Pilot cancellation of pending UOW"""
+
+    reason: str
+
+
+class PilotCancelResponse(BaseModel):
+    """Response for Pilot cancellation"""
+
+    success: bool
+    message: str
+    new_status: str
+
+
 # In-memory storage (replace with database in production)
 workflows: Dict[str, dict] = {}
 
@@ -247,6 +320,103 @@ def get_db_session():
 
     with db_manager.get_instance_session() as session:
         yield session
+
+
+def get_current_pilot(request: Request) -> PilotAuthContext:
+    """
+    Dependency to extract and validate Pilot identity from JWT token.
+    
+    Phase 2 implementation: JWT token-based authentication with RBAC.
+    
+    Expects: Authorization header with format 'Bearer <jwt_token>'
+    Claims:
+    - sub (str): Pilot ID
+    - role (str): Pilot role (ADMIN, OPERATOR, VIEWER)
+    - exp (int): Expiration timestamp
+    
+    Returns:
+        PilotAuthContext with pilot_id and role
+        
+    Raises:
+        HTTPException: 401 if token missing/invalid, 403 if role-based access denied
+        
+    Constitutional Reference: Article XV (Pilot Sovereignty)
+    """
+    try:
+        # Extract Authorization header
+        auth_header = request.headers.get("Authorization")
+        
+        # Initialize JWT validator
+        jwt_config = JWTConfig()
+        validator = JWTValidator(jwt_config)
+        
+        # Extract and parse token
+        token = validator.extract_bearer_token(auth_header)
+        pilot_token: PilotToken = validator.parse_pilot_token(token)
+        
+        # Create auth context
+        auth_context = PilotAuthContext(
+            pilot_id=pilot_token.pilot_id,
+            role=pilot_token.role,
+        )
+        
+        logger.info(f"Pilot authenticated: {auth_context}")
+        
+        return auth_context
+        
+    except MissingTokenError as e:
+        logger.warning(f"Missing or invalid Authorization header: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header. Expected: 'Authorization: Bearer <token>'"
+        )
+    except InvalidTokenError as e:
+        logger.warning(f"Invalid JWT token: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid token: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Authentication error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication failed"
+        )
+
+
+def require_pilot_permission(endpoint: str):
+    """
+    Dependency factory to enforce role-based access control (RBAC).
+    
+    Usage:
+        @app.post("/pilot/kill-switch")
+        async def pilot_kill_switch(
+            auth: PilotAuthContext = Depends(require_pilot_permission("/pilot/kill-switch")),
+        ):
+            ...
+    
+    Args:
+        endpoint: Endpoint path for permission check
+        
+    Returns:
+        Dependency function that checks authorization
+    """
+    async def check_permission_impl(
+        auth: PilotAuthContext = Depends(get_current_pilot),
+    ) -> PilotAuthContext:
+        """Check if Pilot has permission for this endpoint."""
+        try:
+            auth.require_permission(endpoint)
+            logger.debug(f"RBAC: Authorized {auth.pilot_id} for {endpoint}")
+            return auth
+        except InsufficientPermissionsError as e:
+            logger.warning(str(e))
+            raise HTTPException(
+                status_code=403,
+                detail=str(e)
+            )
+    
+    return check_permission_impl
 
 
 async def run_tau_zombie_sweeper():
@@ -820,6 +990,325 @@ async def mark_memory_toxic_endpoint(request: MarkMemoryToxicRequest):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         logger.error(f"Error marking memory as toxic: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ===== Pilot Interface Endpoints (Article XV - Pilot Sovereignty) =====
+# All Pilot actions require X-Pilot-ID header for authentication
+
+
+@app.post("/pilot/kill-switch", response_model=PilotKillSwitchResponse)
+async def pilot_kill_switch(
+    request: PilotKillSwitchRequest,
+    auth: PilotAuthContext = Depends(require_pilot_permission("/pilot/kill-switch")),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Emergency halt: Pilot pauses all ACTIVE UOWs in an instance.
+    
+    Requires: ADMIN role (Article XV - Pilot Sovereignty)
+    Authentication: JWT token in 'Authorization: Bearer <token>' header
+    
+    Args:
+        request: Contains instance_id and reason for emergency halt
+        auth: Authenticated Pilot context from JWT token
+        db: Database session
+        
+    Returns:
+        PilotKillSwitchResponse with count of paused UOWs
+        
+    Raises:
+        HTTPException: 401 if auth token invalid, 403 if insufficient role, 400 if invalid instance_id, 500 on error
+    """
+    try:
+        # Parse instance_id
+        try:
+            instance_uuid = uuid.UUID(request.instance_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid instance_id format")
+        
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Create PilotInterface instance
+        pilot_interface = PilotInterface(db_manager)
+        
+        # Execute kill switch
+        paused_count = pilot_interface.kill_switch(
+            instance_id=instance_uuid,
+            reason=request.reason,
+            pilot_id=auth.pilot_id
+        )
+        
+        logger.info(
+            f"Pilot {auth.pilot_id} ({auth.role.value}) executed kill_switch on instance {instance_uuid}: "
+            f"paused {paused_count} UOWs. Reason: {request.reason}"
+        )
+        
+        return PilotKillSwitchResponse(
+            success=True,
+            message=f"Kill switch executed: {paused_count} UOWs paused",
+            paused_uow_count=paused_count
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in pilot kill_switch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/pilot/clarification/{uow_id}", response_model=PilotClarificationResponse)
+async def pilot_submit_clarification(
+    uow_id: str,
+    request: PilotClarificationRequest,
+    auth: PilotAuthContext = Depends(require_pilot_permission("/pilot/clarification")),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Break ambiguity lock: Pilot provides clarification to resume ZOMBIED_SOFT UOW.
+    
+    Requires: OPERATOR+ role (Article XV - Pilot Sovereignty)
+    Authentication: JWT token in 'Authorization: Bearer <token>' header
+    
+    Args:
+        uow_id: Unit of Work ID in ZOMBIED_SOFT status
+        request: Contains clarification text
+        auth: Authenticated Pilot context from JWT token
+        db: Database session
+        
+    Returns:
+        PilotClarificationResponse with new UOW status
+        
+    Raises:
+        HTTPException: 401 if auth token invalid, 403 if insufficient role, 400 if invalid uow_id, 404 if UOW not found, 500 on error
+    """
+    try:
+        # Parse uow_id
+        try:
+            uow_uuid = uuid.UUID(uow_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uow_id format")
+        
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Create PilotInterface instance
+        pilot_interface = PilotInterface(db_manager)
+        
+        # Submit clarification
+        new_status = pilot_interface.submit_clarification(
+            uow_id=uow_uuid,
+            text=request.text,
+            pilot_id=auth.pilot_id
+        )
+        
+        logger.info(
+            f"Pilot {auth.pilot_id} ({auth.role.value}) submitted clarification for UOW {uow_uuid}. "
+            f"New status: {new_status}"
+        )
+        
+        return PilotClarificationResponse(
+            success=True,
+            message=f"Clarification submitted for UOW {uow_id}",
+            new_status=new_status
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in pilot submit_clarification: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/pilot/waive/{uow_id}/{guard_rule_id}", response_model=PilotWaiverResponse)
+async def pilot_waive_violation(
+    uow_id: str,
+    guard_rule_id: str,
+    request: PilotWaiverRequest,
+    auth: PilotAuthContext = Depends(require_pilot_permission("/pilot/waive")),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Constitutional waiver: Pilot overrides a Constitutional violation with justification.
+    
+    Requires: ADMIN role only (Article XV - Pilot Sovereignty)
+    Authentication: JWT token in 'Authorization: Bearer <token>' header
+    
+    Args:
+        uow_id: Unit of Work ID in PAUSED status
+        guard_rule_id: ID of the Guardian rule being waived
+        request: Contains mandatory justification reason
+        auth: Authenticated Pilot context from JWT token
+        db: Database session
+        
+    Returns:
+        PilotWaiverResponse with waiver logged flag
+        
+    Raises:
+        HTTPException: 401 if auth token invalid, 403 if insufficient role, 400 if invalid IDs or empty reason, 404 if UOW not found, 500 on error
+    """
+    try:
+        # Parse IDs
+        try:
+            uow_uuid = uuid.UUID(uow_id)
+            guard_rule_uuid = uuid.UUID(guard_rule_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uow_id or guard_rule_id format")
+        
+        # Validate reason is non-empty
+        if not request.reason or not request.reason.strip():
+            raise HTTPException(status_code=400, detail="Waiver reason cannot be empty")
+        
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Create PilotInterface instance
+        pilot_interface = PilotInterface(db_manager)
+        
+        # Execute waiver
+        new_status = pilot_interface.waive_violation(
+            uow_id=uow_uuid,
+            guard_rule_id=guard_rule_uuid,
+            reason=request.reason,
+            pilot_id=auth.pilot_id
+        )
+        
+        logger.info(
+            f"Pilot {auth.pilot_id} ({auth.role.value}) waived guard rule {guard_rule_uuid} for UOW {uow_uuid}. "
+            f"Reason: {request.reason}"
+        )
+        
+        return PilotWaiverResponse(
+            success=True,
+            message=f"Constitutional waiver recorded for UOW {uow_id}",
+            waiver_logged=True
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in pilot waive_violation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/pilot/resume/{uow_id}", response_model=PilotResumeResponse)
+async def pilot_resume_uow(
+    uow_id: str,
+    auth: PilotAuthContext = Depends(require_pilot_permission("/pilot/resume")),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Approve high-risk transition: Pilot resumes PENDING_PILOT_APPROVAL UOW.
+    
+    Requires: OPERATOR+ role (Article XV - Pilot Sovereignty)
+    Authentication: JWT token in 'Authorization: Bearer <token>' header
+    
+    Args:
+        uow_id: Unit of Work ID in PENDING_PILOT_APPROVAL status
+        auth: Authenticated Pilot context from JWT token
+        db: Database session
+        
+    Returns:
+        PilotResumeResponse with new UOW status
+        
+    Raises:
+        HTTPException: 401 if auth token invalid, 403 if insufficient role, 400 if invalid uow_id, 404 if UOW not found, 500 on error
+    """
+    try:
+        # Parse uow_id
+        try:
+            uow_uuid = uuid.UUID(uow_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uow_id format")
+        
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Create PilotInterface instance
+        pilot_interface = PilotInterface(db_manager)
+        
+        # Resume UOW
+        new_status = pilot_interface.resume_uow(
+            uow_id=uow_uuid,
+            pilot_id=auth.pilot_id
+        )
+        
+        logger.info(f"Pilot {auth.pilot_id} ({auth.role.value}) approved high-risk transition for UOW {uow_uuid}")
+        
+        return PilotResumeResponse(
+            success=True,
+            message=f"High-risk transition approved for UOW {uow_id}",
+            new_status=new_status
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in pilot resume_uow: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/pilot/cancel/{uow_id}", response_model=PilotCancelResponse)
+async def pilot_cancel_uow(
+    uow_id: str,
+    request: PilotCancelRequest,
+    auth: PilotAuthContext = Depends(require_pilot_permission("/pilot/cancel")),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Reject high-risk transition: Pilot cancels PENDING_PILOT_APPROVAL UOW.
+    
+    Requires: OPERATOR+ role (Article XV - Pilot Sovereignty)
+    Authentication: JWT token in 'Authorization: Bearer <token>' header
+    
+    Args:
+        uow_id: Unit of Work ID in PENDING_PILOT_APPROVAL status
+        request: Contains reason for cancellation
+        auth: Authenticated Pilot context from JWT token
+        db: Database session
+        
+    Returns:
+        PilotCancelResponse with new UOW status (FAILED)
+        
+    Raises:
+        HTTPException: 401 if auth token invalid, 403 if insufficient role, 400 if invalid uow_id, 404 if UOW not found, 500 on error
+    """
+    try:
+        # Parse uow_id
+        try:
+            uow_uuid = uuid.UUID(uow_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uow_id format")
+        
+        if db_manager is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        # Create PilotInterface instance
+        pilot_interface = PilotInterface(db_manager)
+        
+        # Cancel UOW
+        new_status = pilot_interface.cancel_uow(
+            uow_id=uow_uuid,
+            pilot_id=auth.pilot_id,
+            reason=request.reason
+        )
+        
+        logger.info(
+            f"Pilot {auth.pilot_id} ({auth.role.value}) rejected high-risk transition for UOW {uow_uuid}. "
+            f"Reason: {request.reason}"
+        )
+        
+        return PilotCancelResponse(
+            success=True,
+            message=f"High-risk transition rejected for UOW {uow_id}",
+            new_status=new_status
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in pilot cancel_uow: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

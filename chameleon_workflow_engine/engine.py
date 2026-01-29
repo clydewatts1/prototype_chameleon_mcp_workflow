@@ -1313,7 +1313,59 @@ class ChameleonEngine:
                         continue
 
                     # Guard passed (or no guard) - this UOW is valid
-                    # Step 5: Execute Transactional Lock
+                    # Step 5: CHECK INTERACTION LIMIT (per UOW Lifecycle Specs)
+                    # Before transitioning to ACTIVE, verify we haven't hit the ambiguity lock threshold
+                    if (
+                        candidate_uow.max_interactions is not None
+                        and candidate_uow.interaction_count >= candidate_uow.max_interactions
+                    ):
+                        # AMBIGUITY LOCK DETECTED: Interaction limit exceeded
+                        # Transition to ZOMBIED_SOFT (recoverable via /pilot/clarification)
+                        candidate_uow.status = UOWStatus.ZOMBIED_SOFT.value
+                        candidate_uow.last_heartbeat = datetime.now(timezone.utc)
+                        
+                        # Emit ambiguity_lock_detected event for monitoring
+                        from chameleon_workflow_engine.stream_broadcaster import emit
+                        emit(
+                            "ambiguity_lock_detected",
+                            {
+                                "uow_id": str(candidate_uow.uow_id),
+                                "instance_id": str(candidate_uow.instance_id),
+                                "interaction_count": candidate_uow.interaction_count,
+                                "max_interactions": candidate_uow.max_interactions,
+                                "reason": "Interaction limit exceeded - ambiguity lock",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "recovery_options": ["submit_clarification"],
+                            }
+                        )
+                        
+                        # Log ambiguity lock in UOW attributes
+                        ambiguity_attr = UOW_Attributes(
+                            attribute_id=uuid.uuid4(),
+                            uow_id=candidate_uow.uow_id,
+                            instance_id=candidate_uow.instance_id,
+                            key="_ambiguity_lock",
+                            value={
+                                "error_code": "AMBIGUITY_LOCK",
+                                "details": (
+                                    f"Interaction limit exceeded: "
+                                    f"{candidate_uow.interaction_count} >= {candidate_uow.max_interactions}"
+                                ),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "actor_id": str(SYSTEM_ACTOR_ID),
+                            },
+                            version=1,
+                            actor_id=SYSTEM_ACTOR_ID,
+                            reasoning="Interaction limit exceeded during checkout",
+                        )
+                        session.add(ambiguity_attr)
+                        session.flush()
+                        
+                        # Commit and return None (no work available due to ambiguity lock)
+                        session.commit()
+                        return None
+                    
+                    # Step 6: Execute Transactional Lock
                     # Transition PENDING → IN_PROGRESS (using ACTIVE status)
                     candidate_uow.status = UOWStatus.ACTIVE.value
                     candidate_uow.last_heartbeat = datetime.now(timezone.utc)
@@ -1335,7 +1387,7 @@ class ChameleonEngine:
                     # )
                     # session.add(log_entry)
 
-                    # Step 6: Build memory context for this actor + role
+                    # Step 7: Build memory context for this actor + role
                     memory_context = self._build_memory_context(session, role_id, actor_id)
 
                     session.commit()

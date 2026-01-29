@@ -50,6 +50,13 @@ from .models_instance import (
 # Database Manager
 from .manager import DatabaseManager
 
+# UOW Repository (Phase 0 - Database Agnosticism)
+from .uow_repository import UOWRepository
+from .uow_repository_sqlalchemy import UOWRepositorySQLAlchemy, NotFoundError
+
+# State Hasher (Phase 0 - Atomic Traceability)
+from .state_hasher import StateHasher, StateHasherError
+
 __all__ = [
     # Enums
     "RoleType",
@@ -83,4 +90,11 @@ __all__ = [
     "Interaction_Logs",
     # Manager
     "DatabaseManager",
+    # UOW Repository (Phase 0)
+    "UOWRepository",
+    "UOWRepositorySQLAlchemy",
+    "NotFoundError",
+    # State Hasher (Phase 0)
+    "StateHasher",
+    "StateHasherError",
 ]

@@ -23,11 +23,23 @@ To prevent aimless "wandering" or unauthorized tool usage, every UOW is governed
 * **Interaction Counter:** Every UOW maintains a MAX\_INTERACTIONS limit.  
 * If an Agent makes too many calls without reaching a state transition, the UOW is "Zombied" as an Ambiguity Lock.
 
-### **3.2 Timeout Classification**
+### **3.2 Zombie Status Classification & Recovery**
 
-1. **Soft Timeout (Recoverable):** Transient failures. The system attempts a RETRY based on the UOW's retry\_policy.  
-2. **Absolute Dead Timeout (Terminal):** A fatal logic flaw. The UOW is moved to DEAD\_LETTER for Pilot adjudication.
+1. **ZOMBIED\_SOFT (Recoverable):**  
+   * **Cause:** Transient failures (network timeout) or "Ambiguity Lock" (spinning agent).  
+   * **Allowed Transitions:**  
+     * \-\> ACTIVE: Via automated RETRY policy.  
+     * \-\> ACTIVE: Via Pilot submit\_clarification() (injects context and resets interaction count).  
+     * \-\> ZOMBIED\_DEAD: If retry limit exceeded or manual waiver denied.  
+2. **ZOMBIED\_DEAD (Terminal / Dead Letter):**  
+   * **Cause:** Fatal logic flaw, security breach attempt, or max retries exceeded.  
+   * **Allowed Transitions:**  
+     * \-\> FAILED: Final confirmation of failure.  
+     * \-\> ARCHIVED: For audit retention.  
+   * **Constitutional Constraint:** Cannot be moved back to ACTIVE automatically. Requires manual Pilot intervention to fork/fix the Template.
 
 ## **4\. Refinement State**
 
 Before a UOW is moved to ARCHIVED, it passes through a **REFINEMENT\_ANALYSIS** phase where the **Librarian** evaluates efficiency.
+
+**State Hash Rule:** current\_uow.hash must equal last\_recorded.hash. If mismatch, move to FAILED\_SECURITY\_BREACH.

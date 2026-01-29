@@ -689,6 +689,28 @@ class UnitsOfWork(InstanceBase):
         nullable=True,
         comment="UTC timestamp of last heartbeat from the assigned actor. Used by Tau for liveness detection."
     )
+    interaction_count = Column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Number of times this UOW has been processed/evaluated. Incremented on each state transition."
+    )
+    max_interactions = Column(
+        Integer,
+        nullable=True,
+        comment="Maximum allowed interactions before UOW becomes ZOMBIED_SOFT. Null = no limit (Constitutional Article XIII)."
+    )
+    retry_count = Column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Number of retries attempted for ZOMBIED_SOFT recovery. Incremented on each retry."
+    )
+    interaction_policy = Column(
+        JSON,
+        nullable=True,
+        comment="Immutable snapshot of Guardian interaction_policy at UOW creation time. Used for deterministic routing evaluation (Constitutional Article IX)."
+    )
 
 
 class UnitsOfWorkHistory(InstanceBase):
@@ -778,6 +800,17 @@ class UnitsOfWorkHistory(InstanceBase):
         JSON,
         nullable=True,
         comment="Additional context for this transition (e.g., error details, guardian decisions, attribute diffs)."
+    )
+    event_type = Column(
+        String(100),
+        nullable=False,
+        default="STATE_TRANSITION",
+        comment="Type of event: STATE_TRANSITION, CONSTITUTIONAL_WAIVER, UOW_CREATED, PILOT_OVERRIDE, etc."
+    )
+    payload = Column(
+        JSON,
+        nullable=True,
+        comment="Event-specific payload (e.g., for CONSTITUTIONAL_WAIVER: {rule_ignored, waived_by, justification})."
     )
 
     # Relationships

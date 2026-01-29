@@ -93,12 +93,25 @@ class AssignmentStatus(str, Enum):
 class UOWStatus(str, Enum):
     """
     Current state of a Unit of Work.
+    
+    Constitutional References:
+    - PENDING_PILOT_APPROVAL: Article XV (Pilot Management & Oversight)
+    - ZOMBIED_SOFT, ZOMBIED_DEAD: Article XII & XIII (Token Reclamation)
+    - PAUSED: Article XV (Emergency pause via kill_switch)
+    - FAILED_SECURITY_BREACH: Article XVII (State hash mismatch detection)
+    - ARCHIVED: Article IV (Final lifecycle state post-REFINEMENT_ANALYSIS)
     """
 
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    PENDING_PILOT_APPROVAL = "PENDING_PILOT_APPROVAL"  # High-risk transition awaiting Pilot approval
+    ZOMBIED_SOFT = "ZOMBIED_SOFT"  # Recoverable: transient failure or ambiguity lock
+    ZOMBIED_DEAD = "ZOMBIED_DEAD"  # Terminal: fatal error, requires manual intervention
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    PAUSED = "PAUSED"  # Manually paused by Pilot kill_switch
+    FAILED_SECURITY_BREACH = "FAILED_SECURITY_BREACH"  # State hash mismatch detected
+    ARCHIVED = "ARCHIVED"  # Post-refinement analysis, audit retention
 
 
 # ============================================================================

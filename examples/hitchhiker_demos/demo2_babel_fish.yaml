@@ -1,0 +1,199 @@
+# Demo 2: Babel Fish Translator
+# ==============================
+# A demonstration of Dynamic Context Injection with species-specific mutations.
+#
+# STORY: The Babel Fish is a small fish that provides instant translation.
+# However, different species prefer different communication styles.
+# This workflow demonstrates model selection and instruction injection based on
+# the recipient species, creating culturally-appropriate translations.
+#
+# FEATURES:
+# - Multiple mutation pathways (Vogon, Human, Betelgeusian)
+# - DCI with three different instruction sets
+# - Provider Router for model selection
+# - Constitutional Article XX: Model Orchestration
+
+workflow: Babel_Fish_Translator
+description: >
+  Translates messages using species-specific context.
+  Demonstrates Dynamic Context Injection with cultural adaptation.
+
+version: 1
+
+roles:
+  - name: Message_Receiver
+    type: ALPHA
+    description: >
+      Receives a message in a universal language.
+      Identifies the recipient species for cultural adaptation.
+    interactions:
+      - name: receive_message
+        input_schema:
+          type: object
+          properties:
+            message:
+              type: string
+              description: The message to translate
+            recipient_species:
+              type: string
+              enum: [Vogon, Human, Betelgeusian]
+              description: Target audience species
+            tone:
+              type: string
+              enum: [neutral, formal, casual]
+  
+  - name: Translator
+    type: BETA
+    description: >
+      Core translation role with species-specific context injection.
+      Uses guards to select appropriate instruction sets and models.
+    interactions:
+      - name: translate_message
+        input_schema:
+          type: object
+          properties:
+            message:
+              type: string
+            recipient_species:
+              type: string
+            translation:
+              type: string
+        
+        # SEMANTIC GUARDS: Species-specific mutation injection
+        guards:
+          - guardian_type: CONDITIONAL_INJECTOR
+            name: Species_Adaptation_Guard
+            description: >
+              Injects species-specific translation instructions.
+              Ensures communication matches recipient preferences.
+            
+            conditions:
+              - expression: "recipient_species == 'Vogon'"
+                description: "Vogon recipient detected"
+              - expression: "recipient_species == 'Human'"
+                description: "Human recipient detected"
+              - expression: "recipient_species == 'Betelgeusian'"
+                description: "Betelgeusian recipient detected"
+            
+            # Three mutation pathways for different species
+            mutations:
+              # Vogon mutation: Aggressive, destructive tone
+              - condition_index: 0
+                model_id: "gpt-4"
+                injected_instructions: |
+                  VOGON TRANSLATION PROTOCOL:
+                  
+                  Vogons appreciate aggressive, destructive communication.
+                  Translate the message with:
+                  1. Harsh, cutting language
+                  2. Emphasis on destruction and demolition
+                  3. References to bureaucratic inefficiency
+                  4. Contempt for inferior life forms
+                  
+                  Example: "Your poetry is like a supernova's aftermath - 
+                  utterly destructive and completely unintelligible."
+                  
+                  Do NOT soften the message. Vogons respect bluntness.
+                
+                knowledge_fragment_refs:
+                  - "vogon_cultural_preferences"
+                  - "aggressive_communication_patterns"
+                
+                audit_context: "Vogon audience - aggressive context injected"
+              
+              # Human mutation: Polite, diplomatic tone
+              - condition_index: 1
+                model_id: "gpt-4-turbo"
+                injected_instructions: |
+                  HUMAN TRANSLATION PROTOCOL:
+                  
+                  Humans prefer polite, diplomatic communication.
+                  Translate the message with:
+                  1. Courteous language and respectful tone
+                  2. Acknowledgment of the recipient's perspective
+                  3. Offers of cooperation and mutual benefit
+                  4. Emotional intelligence and empathy
+                  
+                  Example: "I appreciate your perspective. Perhaps we could 
+                  explore a mutually beneficial approach to this challenge."
+                  
+                  Soften criticism. Humans respond well to politeness.
+                
+                knowledge_fragment_refs:
+                  - "human_cultural_preferences"
+                  - "diplomatic_communication_patterns"
+                
+                audit_context: "Human audience - diplomatic context injected"
+              
+              # Betelgeusian mutation: Flattering, philosophical tone
+              - condition_index: 2
+                model_id: "claude-3-opus"
+                injected_instructions: |
+                  BETELGEUSIAN TRANSLATION PROTOCOL:
+                  
+                  Betelgeusians appreciate flattery, philosophy, and complexity.
+                  Translate the message with:
+                  1. Elaborate philosophical frameworks
+                  2. Excessive flattery and ego-boosting
+                  3. Complex, multidimensional perspectives
+                  4. References to cosmic significance
+                  
+                  Example: "Your unparalleled wisdom, combined with your 
+                  cosmic perspective, grants you unique insight into this 
+                  multidimensional challenge."
+                  
+                  Don't hold back on flattery. Betelgeusians are vain.
+                
+                knowledge_fragment_refs:
+                  - "betelgeusian_cultural_preferences"
+                  - "philosophical_communication_patterns"
+                
+                audit_context: "Betelgeusian audience - flattering context injected"
+
+  - name: Translation_Finisher
+    type: OMEGA
+    description: >
+      Completes the translation process and delivers the message.
+      Verifies cultural appropriateness of the translation.
+    interactions:
+      - name: finalize_translation
+        input_schema:
+          type: object
+          properties:
+            final_translation:
+              type: string
+            recipient_species:
+              type: string
+            cultural_fit:
+              type: string
+              enum: [perfect, good, acceptable]
+
+# Components for data flow
+components:
+  - name: message_data
+    schema:
+      message: string
+      recipient_species: string
+      tone: string
+  
+  - name: translation_result
+    schema:
+      translation: string
+      cultural_context: string
+      model_used: string
+
+# Workflow topology
+topology:
+  initial_role: Message_Receiver
+  transitions:
+    - from: Message_Receiver
+      interaction: receive_message
+      to: Translator
+    
+    - from: Translator
+      interaction: translate_message
+      to: Translation_Finisher
+    
+    - from: Translation_Finisher
+      interaction: finalize_translation
+      status: COMPLETE

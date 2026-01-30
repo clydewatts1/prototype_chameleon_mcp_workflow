@@ -1,0 +1,156 @@
+# Demo 1: Vogon Poetry Validator
+# ================================
+# A humorous workflow that demonstrates Semantic Guards with conditional mutation injection.
+# 
+# STORY: The Vogon Constructor Fleet doesn't appreciate poetry that's too good.
+# When a Vogon tries to submit poetry, we inject protective instructions to ensure
+# the galaxy survives the experience.
+#
+# FEATURES:
+# - CONDITIONAL_INJECTOR guard that detects Vogon authors
+# - Safety protocol instruction injection
+# - DCI (Dynamic Context Injection) demonstration
+
+workflow: Poem_Validator_Workflow
+description: >
+  Validates poems and applies safety protocols for Vogon poets.
+  Demonstrates conditional context injection and semantic guards.
+
+version: 1
+
+roles:
+  - name: Poem_Submitter
+    type: ALPHA
+    description: >
+      Initiates poem validation workflow.
+      Submits poem with author information.
+    interactions:
+      - name: submit_poem
+        input_schema:
+          type: object
+          properties:
+            poem_text:
+              type: string
+              description: The poem being submitted
+            author:
+              type: string
+              enum: [Vogon, Human, Betelgeusian]
+              description: Species of the poet
+            quality_level:
+              type: number
+              description: Self-rated quality (1-10)
+  
+  - name: Poetry_Critic
+    type: BETA
+    description: >
+      Evaluates the poem's content and literary merit.
+      Applies semantic guards to detect potentially dangerous poets.
+    interactions:
+      - name: evaluate_poetry
+        input_schema:
+          type: object
+          properties:
+            poem_text:
+              type: string
+            author:
+              type: string
+            evaluation:
+              type: object
+              properties:
+                merits:
+                  type: array
+                  items: string
+                concerns:
+                  type: array
+                  items: string
+                risk_level:
+                  type: string
+                  enum: [low, medium, high]
+        
+        # SEMANTIC GUARD: The critical component
+        # When author is 'Vogon', inject safety protocol instructions
+        guards:
+          - guardian_type: CONDITIONAL_INJECTOR
+            name: Vogon_Safety_Protocol
+            description: >
+              Detects Vogon poets and injects protective instructions.
+              Ensures we don't accidentally trigger a literary apocalypse.
+            
+            conditions:
+              - expression: "author == 'Vogon'"
+                description: "True when author is a Vogon"
+            
+            # Mutation payload: Instructions injected into UOW
+            mutations:
+              - condition_index: 0
+                model_id: "gemini-flash"
+                injected_instructions: |
+                  CRITICAL SAFETY PROTOCOL:
+                  
+                  This submission is from a VOGON CONSTRUCTOR.
+                  Vogon poetry is known to be destructively bad.
+                  
+                  Guidelines for handling Vogon poetry:
+                  1. Evaluate with extreme caution
+                  2. Focus on structural issues, never on emotional impact
+                  3. Recommend extensive revision before publication
+                  4. Alert the Pan Galactic Council if quality exceeds 7/10
+                  5. Keep a blast shield ready during reading
+                  
+                  Remember: "The answer to the meaning of life is 42, 
+                  but the answer to Vogon poetry is NO."
+                
+                knowledge_fragment_refs:
+                  - "vogon_poetry_protocols"
+                  - "safety_guidelines"
+                
+                # Mutation audit tracking
+                audit_context: "Vogon author detected - protective measures activated"
+
+  - name: Final_Judgment
+    type: OMEGA
+    description: >
+      Final disposition of the poem and recommendation.
+      Reconciles critic feedback and applies final decision.
+    interactions:
+      - name: final_verdict
+        input_schema:
+          type: object
+          properties:
+            approved:
+              type: boolean
+            reason:
+              type: string
+            safety_applied:
+              type: boolean
+
+# Component definitions describe the data flow
+components:
+  - name: poem_data
+    schema:
+      poem_text: string
+      author: string
+      quality_level: number
+  
+  - name: evaluation_result
+    schema:
+      merits: array
+      concerns: array
+      risk_level: string
+      safety_injected: boolean
+
+# Topology defines workflow progression
+topology:
+  initial_role: Poem_Submitter
+  transitions:
+    - from: Poem_Submitter
+      interaction: submit_poem
+      to: Poetry_Critic
+    
+    - from: Poetry_Critic
+      interaction: evaluate_poetry
+      to: Final_Judgment
+    
+    - from: Final_Judgment
+      interaction: final_verdict
+      status: COMPLETE

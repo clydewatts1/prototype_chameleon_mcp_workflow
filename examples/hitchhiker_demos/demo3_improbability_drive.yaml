@@ -1,0 +1,233 @@
+# Demo 3: Infinite Improbability Drive Navigation
+# ================================================
+# A complex demonstration of Dynamic Context Injection with multi-model orchestration.
+#
+# STORY: The Infinite Improbability Drive allows space travel by making
+# the improbable probable. Different improbability levels require different
+# navigation models with specialized instructions.
+#
+# FEATURES:
+# - Three-level improbability hierarchy
+# - Model orchestration based on computed ranges
+# - Advanced DCI with non-Euclidean space instructions
+# - Constitutional Article XX: Multi-model orchestration
+
+workflow: Infinite_Improbability_Navigator
+description: >
+  Manages space navigation using the Infinite Improbability Drive.
+  Selects models and instructions based on improbability levels.
+
+version: 1
+
+roles:
+  - name: Navigation_Initiator
+    type: ALPHA
+    description: >
+      Initiates hyperspace navigation.
+      Calculates improbability levels and trajectory parameters.
+    interactions:
+      - name: initiate_navigation
+        input_schema:
+          type: object
+          properties:
+            source_coordinates:
+              type: object
+              properties:
+                x: number
+                y: number
+                z: number
+            destination:
+              type: string
+              description: Target star system or location
+            improbability_level:
+              type: number
+              description: >
+                Improbability factor (higher = more improbable).
+                0-99: Normal space
+                100-999,999: High improbability regions
+                1,000,000+: Chaos space
+  
+  - name: Navigation_Computer
+    type: BETA
+    description: >
+      Core navigation AI with improbability-aware course plotting.
+      Applies Dynamic Context Injection based on improbability levels.
+    interactions:
+      - name: plot_course
+        input_schema:
+          type: object
+          properties:
+            source: object
+            destination: string
+            improbability_level: number
+            course:
+              type: array
+              items:
+                type: object
+                properties:
+                  waypoint: string
+                  instructions: string
+        
+        # SEMANTIC GUARD: Improbability-based model selection
+        guards:
+          - guardian_type: CONDITIONAL_INJECTOR
+            name: Improbability_Model_Router
+            description: >
+              Routes navigation through appropriate model based on improbability.
+              Normal space uses standard models; chaos space requires creative AI.
+            
+            conditions:
+              - expression: "improbability_level >= 0 && improbability_level <= 99"
+                description: "Normal space navigation (low improbability)"
+              - expression: "improbability_level > 99 && improbability_level <= 999999"
+                description: "High improbability region (warped space)"
+              - expression: "improbability_level > 999999"
+                description: "Chaos space (non-Euclidean)"
+            
+            mutations:
+              # Normal space: Standard navigation
+              - condition_index: 0
+                model_id: "gemini-flash"
+                injected_instructions: |
+                  NORMAL SPACE NAVIGATION PROTOCOL:
+                  
+                  Improbability Level: STANDARD (0-99)
+                  Space Type: Euclidean geometry
+                  Physics: Classical mechanics apply
+                  
+                  Navigation guidelines:
+                  1. Plot shortest path between source and destination
+                  2. Account for stellar drift and gravitational wells
+                  3. Calculate fuel requirements using standard equations
+                  4. Route through established trade lanes when possible
+                  5. Verify all coordinates against star charts
+                  
+                  Safety: Standard space is highly predictable. 
+                  Use traditional navigation methods.
+                
+                knowledge_fragment_refs:
+                  - "standard_navigation_protocols"
+                  - "star_chart_database"
+                  - "fuel_consumption_tables"
+                
+                audit_context: "Normal space - standard model deployed"
+              
+              # High improbability: Advanced mathematical navigation
+              - condition_index: 1
+                model_id: "gpt-4"
+                injected_instructions: |
+                  HIGH IMPROBABILITY NAVIGATION PROTOCOL:
+                  
+                  Improbability Level: HIGH (100-999,999)
+                  Space Type: Warped/curved topology
+                  Physics: Relativistic effects dominant
+                  
+                  Navigation guidelines:
+                  1. Account for non-Euclidean space geometry
+                  2. Calculate probability fields around the route
+                  3. Exploit improbability currents for faster travel
+                  4. Monitor quantum uncertainty effects
+                  5. Adjust course for dimensional fluctuations
+                  
+                  Critical: In high improbability regions, the improbable 
+                  becomes probable. This is a FEATURE, not a bug.
+                  
+                  Strategy: Navigate TOWARD improbable outcomes.
+                  The drive makes them probable.
+                
+                knowledge_fragment_refs:
+                  - "non_euclidean_geometry"
+                  - "probability_field_calculations"
+                  - "improbability_current_maps"
+                
+                audit_context: "High improbability - advanced model deployed"
+              
+              # Chaos space: Creative, unconventional thinking required
+              - condition_index: 2
+                model_id: "grok-2"
+                injected_instructions: |
+                  CHAOS SPACE NAVIGATION PROTOCOL:
+                  
+                  Improbability Level: CHAOS (>999,999)
+                  Space Type: Non-deterministic/surreal
+                  Physics: All laws optional and negotiable
+                  
+                  Navigation guidelines:
+                  1. Abandon conventional geometry entirely
+                  2. Navigate using dream logic and paradox
+                  3. Accept that source and destination may be identical
+                  4. The path between points is NOT unique or traversable
+                  5. Probability itself is the navigation medium
+                  
+                  CRITICAL INSIGHTS:
+                  - The shortest distance between two points is undefined
+                  - Time flows sideways here, occasionally upwards
+                  - A thing can be in two places AND no places simultaneously
+                  - The answer to "where are we?" is "yes"
+                  
+                  NAVIGATION PARADOX:
+                  In chaos space, the Infinite Improbability Drive works BEST
+                  because everything is equally improbable. Therefore, 
+                  your destination is guaranteed. Probably.
+                  
+                  Or was guaranteed. Or will be. Tenses collapse here.
+                
+                knowledge_fragment_refs:
+                  - "chaos_space_paradox_theory"
+                  - "surreal_geometry"
+                  - "quantum_indeterminacy_principles"
+                  - "vogon_poetry_as_navigational_aid"
+                
+                audit_context: "Chaos space - creative model deployed with paradox engine enabled"
+
+  - name: Navigation_Completer
+    type: OMEGA
+    description: >
+      Finalizes navigation and verifies arrival.
+      Reconciles actual position with intended destination.
+    interactions:
+      - name: complete_navigation
+        input_schema:
+          type: object
+          properties:
+            improbability_level: number
+            destination: string
+            actual_location:
+              type: string
+              description: Where we actually ended up
+            success:
+              type: boolean
+            note:
+              type: string
+              description: Observations about the journey
+
+# Components
+components:
+  - name: navigation_data
+    schema:
+      source: object
+      destination: string
+      improbability_level: number
+  
+  - name: navigation_result
+    schema:
+      course: array
+      model_used: string
+      instructions_applied: string
+      arrival_confirmed: boolean
+
+# Topology
+topology:
+  initial_role: Navigation_Initiator
+  transitions:
+    - from: Navigation_Initiator
+      interaction: initiate_navigation
+      to: Navigation_Computer
+    
+    - from: Navigation_Computer
+      interaction: plot_course
+      to: Navigation_Completer
+    
+    - from: Navigation_Completer
+      interaction: complete_navigation
+      status: COMPLETE

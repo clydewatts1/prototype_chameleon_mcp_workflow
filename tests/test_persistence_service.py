@@ -44,7 +44,30 @@ from database.persistence_service import (
     ShadowLoggerTelemetryAdapter,
     get_telemetry_buffer,
     reset_telemetry_buffer,
+    GuardContext,
 )
+
+
+class MockGuardContext(GuardContext):
+    """Mock GuardContext for testing that always authorizes."""
+    
+    def is_authorized(self, actor_id, uow_id):
+        """Always return True for testing."""
+        return True
+    
+    def wait_for_pilot(self, uow_id, reason, timeout_seconds=300):
+        """Return mock approval immediately."""
+        return {"approved": True, "pilot_id": "test-pilot"}
+    
+    def emit_violation(self, violation_packet):
+        """Silently ignore violations for testing."""
+        pass
+
+
+@pytest.fixture
+def guard_context():
+    """Create a mock guard context for tests."""
+    return MockGuardContext()
 
 
 @pytest.fixture
@@ -146,7 +169,7 @@ def uow(db, instance_context, workflow, interaction):
 class TestUOWPersistenceService:
     """Tests for UOWPersistenceService."""
 
-    def test_save_uow_with_attributes(self, db, uow, actor):
+    def test_save_uow_with_attributes(self, db, uow, actor, guard_context):
         """Test saving UOW computes and stores content hash."""
         # Add attributes
         attr1 = UOW_Attributes(
@@ -174,6 +197,7 @@ class TestUOWPersistenceService:
         updated_uow = UOWPersistenceService.save_uow(
             session=db,
             uow=uow,
+            guard_context=guard_context,
             new_status=UOWStatus.ACTIVE.value,
             actor_id=actor.actor_id,
             reasoning="Starting processing",
@@ -189,7 +213,7 @@ class TestUOWPersistenceService:
         # Verify status changed
         assert updated_uow.status == UOWStatus.ACTIVE.value
 
-    def test_save_uow_creates_history(self, db, uow, actor, interaction):
+    def test_save_uow_creates_history(self, db, uow, actor, interaction, guard_context):
         """Test that status change creates a history entry."""
         # Add attributes
         attr = UOW_Attributes(
@@ -208,6 +232,7 @@ class TestUOWPersistenceService:
         UOWPersistenceService.save_uow(
             session=db,
             uow=uow,
+            guard_context=guard_context,
             new_status=UOWStatus.ACTIVE.value,
             actor_id=actor.actor_id,
             reasoning="Test transition",
@@ -223,7 +248,7 @@ class TestUOWPersistenceService:
         assert history[0].new_status == UOWStatus.ACTIVE.value
         assert history[0].reasoning == "Test transition"
 
-    def test_save_uow_no_history_without_change(self, db, uow, actor):
+    def test_save_uow_no_history_without_change(self, db, uow, actor, guard_context):
         """Test that saving without change doesn't create history."""
         # Add attributes
         attr = UOW_Attributes(
@@ -242,6 +267,7 @@ class TestUOWPersistenceService:
         UOWPersistenceService.save_uow(
             session=db,
             uow=uow,
+            guard_context=guard_context,
             actor_id=actor.actor_id,
         )
 
@@ -251,7 +277,7 @@ class TestUOWPersistenceService:
         ).all()
         assert len(history) == 0
 
-    def test_get_uow_history_chronological(self, db, uow, actor, interaction):
+    def test_get_uow_history_chronological(self, db, uow, actor, interaction, guard_context):
         """Test retrieving UOW history in chronological order."""
         # Add attributes
         attr = UOW_Attributes(
@@ -272,6 +298,7 @@ class TestUOWPersistenceService:
             UOWPersistenceService.save_uow(
                 session=db,
                 uow=uow,
+                guard_context=guard_context,
                 new_status=status,
                 actor_id=actor.actor_id,
             )
@@ -283,7 +310,7 @@ class TestUOWPersistenceService:
         assert history[0].new_status == UOWStatus.ACTIVE.value
         assert history[1].new_status == UOWStatus.COMPLETED.value
 
-    def test_verify_state_hash_valid(self, db, uow, actor):
+    def test_verify_state_hash_valid(self, db, uow, actor, guard_context):
         """Test state hash verification with valid attributes."""
         # Add attributes
         attr = UOW_Attributes(
@@ -299,13 +326,13 @@ class TestUOWPersistenceService:
         db.flush()
 
         # Save UOW (computes hash)
-        UOWPersistenceService.save_uow(db, uow, actor_id=actor.actor_id)
+        UOWPersistenceService.save_uow(db, uow, guard_context=guard_context, actor_id=actor.actor_id)
 
         # Verify hash matches
         is_valid = UOWPersistenceService.verify_state_hash(db, uow)
         assert is_valid is True
 
-    def test_verify_state_hash_drift_detection(self, db, uow, actor):
+    def test_verify_state_hash_drift_detection(self, db, uow, actor, guard_context):
         """Test state hash verification detects attribute modification."""
         # Add initial attribute
         attr = UOW_Attributes(
@@ -321,7 +348,7 @@ class TestUOWPersistenceService:
         db.flush()
 
         # Save UOW
-        UOWPersistenceService.save_uow(db, uow, actor_id=actor.actor_id)
+        UOWPersistenceService.save_uow(db, uow, guard_context=guard_context, actor_id=actor.actor_id)
         original_hash = uow.content_hash
 
         # Modify attribute value (simulate drift)

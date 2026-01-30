@@ -953,6 +953,10 @@ class ChameleonEngine:
         """
         Evaluate interaction_policy using Semantic Guard (advanced expressions).
         
+        Implements Constitution ARTICLE IX.1: Interaction Policy Evaluation.
+        Enforces Topology Constraint: policies can only route to explicitly
+        defined OUTBOUND components in the workflow topology.
+        
         Supports:
         - Arithmetic: +, -, *, /, %
         - Boolean logic: and, or, not
@@ -964,12 +968,12 @@ class ChameleonEngine:
         Args:
             session: Database session
             uow: The Unit of Work
-            outbound_components: OUTBOUND components for routing
+            outbound_components: OUTBOUND components for routing (topology constraint)
             eval_context: Attribute context for evaluation
             state_hash: Current state hash for verification
         
         Returns:
-            UUID of next Interaction, or None if no match
+            UUID of next Interaction from outbound component, or None if no match
         """
         guard = SemanticGuard()
         
@@ -1007,15 +1011,9 @@ class ChameleonEngine:
                         f"{result.next_interaction} (action: {result.action})"
                     )
                     
-                    # Find interaction by name
-                    interaction = (
-                        session.query(Local_Interactions)
-                        .filter(Local_Interactions.name == result.next_interaction)
-                        .first()
-                    )
-                    
-                    if interaction:
-                        return interaction.interaction_id
+                    # Return the component's interaction_id (Topology Constraint)
+                    # The policy matched, so route via this component's defined interaction
+                    return component.interaction_id
                 else:
                     # Policy evaluation failed
                     logger.error(

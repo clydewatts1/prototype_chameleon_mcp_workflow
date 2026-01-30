@@ -1,35 +1,60 @@
 # **Guard Behavior Specifications**
 
-## **1\. Automated Enforcement Mandate**
+## **1\. Core Philosophy**
 
-Guards serve as the automated "Police" of the system. They are non-bypassable and operate at the protocol level.
+Guards in Chameleon are the enforcement layer of the architecture. They act as the "immune system," protecting the workflow from invalid states, policy violations, and low-quality outputs. Guards are **distinct from Roles**; they do not generate content, they evaluate it.
 
-### **1.1 The Violation Packet**
+## **2\. Guard Types**
 
-When a Guard blocks an action, it must emit a standardized **Violation Packet**:
+### **A. Semantic Guards (Policy & Safety)**
 
-* rule\_id: The specific Constitutional article or Guard rule triggered.  
-* severity: \[LOW, MEDIUM, HIGH, CRITICAL\].  
-* raw\_data: The snippet of data or intent that caused the block.  
-* remedy\_suggestion: Machine-generated advice for the Pilot to resolve the block.
+* **Function**: Analyze the *content* of a message or artifact.  
+* **Mechanism**: LLM-based evaluation against natural language policy sets (e.g., "Ensure tone is professional", "Check for PII").  
+* **Trigger**: Can run Pre-Execution (on inputs) or Post-Execution (on outputs).
 
-## **2\. Three-Layer Defense**
+### **B. Structural Guards (Schema & Format)**
 
-### **2.1 Pre-Flight Guards (Intent Check)**
+* **Function**: Validate the *structure* of data.  
+* **Mechanism**: Code-based validation (JSON Schema, Regex, Type Checking).  
+* **Trigger**: Primarily Post-Execution to ensure an agent's output matches the required format for the next step.
 
-* **Validation:** Checks if the Agent has the necessary permissions to call a specific tool for the current UOW.  
-* **Environmental Integrity:** Ensures the required MCP resources are available and in a safe state.
+### **C. Conditional Injectors (Context & Routing)**
 
-### **2.2 Semantic Guards (Logic Check)**
+* **Function**: Mutate the execution environment based on state.  
+* **Mechanism**: Evaluates DSL conditions against Project State to inject specific instructions, knowledge, or swap the underlying LLM model.  
+* **Trigger**: Pre-Execution (during UOW preparation).  
+* **Reference**: See [Dynamic Context Injection Specs](https://www.google.com/search?q=Dynamic_Context_Injection_Specs.md) for detailed routing logic.
 
-* **Output Analysis:** Verifies that the Agent's output satisfies the "Definition of Done."  
-* **Loop Prevention:** Detects repetitive "spinning" behavior (Ambiguity Lock).
+## **3\. The Guard Lifecycle**
 
-### **2.3 Structural Guards (Protocol Check)**
+1. **Interception**: The Engine pauses the UOW workflow at a designated Guard Point.  
+2. **Evaluation**:  
+   * The Guard receives the payload (Input or Output).  
+   * It retrieves the specific Rule Set defined in the YAML.  
+   * It performs the check (LLM call or Code execution).  
+3. **Verdict**:  
+   * **PASS**: The UOW continues to the next step.  
+   * **FAIL**:  
+     * **Blocking**: The UOW is halted. A Violation event is logged.  
+     * **Correction**: (Optional) The Guard returns feedback to the Agent for a retry.  
+   * **MUTATE** (Injectors only): The UOW metadata (model, prompt) is updated, and the UOW continues.
 
-* **Hash Verification:** Re-calculates the state\_hash of the UOW to ensure no unauthorized data modification occurred during execution.
+## **4\. Configuration Schema**
 
-## **3\. Heuristic Evolution & Learning**
+Guards are defined in the Workflow YAML:
 
-* **Override Tracking:** If a Pilot issues a "Constitutional Waiver" for a specific block, the Guard logs this as a "Heuristic Signal."  
-* **Librarian Integration:** Repeated signals are sent to the **Librarian** to evaluate if the underlying Guard rule needs refinement to reduce friction.
+guards:  
+  \- id: output\_safety\_check  
+    type: semantic  
+    rules:  
+      \- "No profanity allowed"  
+      \- "Must mention the company name"  
+    retry\_limit: 3
+
+## **5\. Logging & Audit**
+
+All Guard evaluations are logged to the **ShadowLogger**.
+
+* **Success**: Logged as GUARD\_PASS.  
+* **Failure**: Logged as GUARD\_FAIL with the specific rule violated and the raw input.  
+* **Mutation**: Logged as CONTEXT\_INJECTION with the applied overrides.

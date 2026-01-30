@@ -57,6 +57,7 @@ class GuardianType(str, Enum):
     DIRECTIONAL_FILTER = "DIRECTIONAL_FILTER"  # Routes UOW sets based on attribute results
     TTL_CHECK = "TTL_CHECK"  # Time-to-live validation based on age of UOW
     COMPOSITE = "COMPOSITE"  # Chains multiple guard checks with AND/OR logic
+    CONDITIONAL_INJECTOR = "CONDITIONAL_INJECTOR"  # Dynamic Context Injection - mutates execution context at runtime
 
 
 class InstanceStatus(str, Enum):

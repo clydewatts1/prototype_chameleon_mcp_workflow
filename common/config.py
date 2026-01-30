@@ -81,3 +81,4 @@ _config = Config()
 # Shared by Server, Tools, and Tests
 TEMPLATE_DB_URL = Config.get("TEMPLATE_DB_URL", "sqlite:///template.db")
 INSTANCE_DB_URL = Config.get("INSTANCE_DB_URL", "sqlite:///instance.db")
+PHASE3_DB_URL = Config.get("PHASE3_DB_URL", "sqlite:///phase3.db")

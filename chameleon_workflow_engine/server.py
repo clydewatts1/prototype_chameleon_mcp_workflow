@@ -42,16 +42,22 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from database import DatabaseManager, UnitsOfWork
+from database.models_phase3 import Phase3DatabaseManager
+from database.intervention_store_sqlalchemy import InterventionStoreSQLAlchemy
 from chameleon_workflow_engine.engine import ChameleonEngine
 from chameleon_workflow_engine.pilot_interface import PilotInterface
+from chameleon_workflow_engine.interactive_dashboard import (
+    initialize_intervention_store, get_intervention_store, InterventionStatus
+)
 from chameleon_workflow_engine.jwt_utils import (
     JWTValidator, JWTConfig, PilotToken, InvalidTokenError, MissingTokenError
 )
 from chameleon_workflow_engine.rbac import PilotAuthContext, InsufficientPermissionsError
-from common.config import TEMPLATE_DB_URL, INSTANCE_DB_URL
+from common.config import TEMPLATE_DB_URL, INSTANCE_DB_URL, PHASE3_DB_URL
 
-# Initialize database manager (will be configured on startup)
+# Initialize database managers (will be configured on startup)
 db_manager: Optional[DatabaseManager] = None
+phase3_db_manager: Optional[Phase3DatabaseManager] = None
 
 # Background task handle
 zombie_sweeper_task: Optional[asyncio.Task] = None
@@ -60,12 +66,14 @@ zombie_sweeper_task: Optional[asyncio.Task] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
-    global db_manager, zombie_sweeper_task
+    global db_manager, phase3_db_manager, zombie_sweeper_task
 
-    # Startup: Initialize database and start background tasks
+    # Startup: Initialize databases and start background tasks
     logger.info(f"Connecting to Template DB: {TEMPLATE_DB_URL}")
     logger.info(f"Connecting to Instance DB: {INSTANCE_DB_URL}")
+    logger.info(f"Connecting to Phase 3 DB: {PHASE3_DB_URL}")
     
+    # Initialize Tier 1/2 databases (workflow engine)
     db_manager = DatabaseManager(template_url=TEMPLATE_DB_URL, instance_url=INSTANCE_DB_URL)
 
     try:
@@ -77,6 +85,20 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:
         logger.warning(f"Database schema already exists or error: {e}")
+
+    # Initialize Phase 3 database (intervention persistence)
+    phase3_db_manager = Phase3DatabaseManager(database_url=PHASE3_DB_URL)
+    try:
+        phase3_db_manager.create_schema()
+        logger.info(f"Phase 3 database initialized: {PHASE3_DB_URL}")
+    except Exception as e:
+        logger.warning(f"Phase 3 database schema already exists or error: {e}")
+
+    # Initialize intervention store with SQLAlchemy backend
+    session = phase3_db_manager.get_session()
+    intervention_store = InterventionStoreSQLAlchemy(session)
+    initialize_intervention_store(intervention_store)
+    logger.info("Intervention store initialized with SQLAlchemy backend")
 
     # Start zombie sweeper background task
     zombie_sweeper_task = asyncio.create_task(run_tau_zombie_sweeper())
@@ -92,6 +114,11 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         logger.info("Zombie Actor Sweeper task stopped")
+
+    # Close database sessions
+    if session:
+        session.close()
+        logger.info("Phase 3 database session closed")
 
 
 # Initialize FastAPI app with lifespan
@@ -498,6 +525,235 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+# ============================================================================
+# Intervention REST API Endpoints (Phase 3)
+# ============================================================================
+
+
+@app.get("/api/interventions/pending")
+async def get_pending_interventions(
+    limit: int = 50,
+    offset: int = 0,
+    pilot_id: str | None = None,
+):
+    """
+    Get pending intervention requests.
+    
+    Args:
+        limit: Maximum number of results
+        offset: Pagination offset
+        pilot_id: Filter by assigned pilot (optional)
+    
+    Returns:
+        List of pending intervention requests
+    """
+    store = get_intervention_store()
+    if not store:
+        raise HTTPException(status_code=500, detail="Intervention store not initialized")
+    
+    requests = store.get_pending_requests(pilot_id=pilot_id, limit=limit)
+    # Apply offset manually since store doesn't support it
+    return [r.to_dict() for r in requests[offset:]]
+
+
+@app.get("/api/interventions/metrics")
+async def get_metrics():
+    """
+    Get intervention metrics and analytics.
+    
+    Returns:
+        DashboardMetrics with aggregated statistics
+    """
+    store = get_intervention_store()
+    metrics = store.get_metrics()
+    return metrics.to_dict()
+
+
+@app.get("/api/interventions/{request_id}")
+async def get_intervention(request_id: str):
+    """
+    Get a single intervention request by ID.
+    
+    Args:
+        request_id: The intervention request ID
+    
+    Returns:
+        InterventionRequest object
+    """
+    store = get_intervention_store()
+    request = store.get_request(request_id)
+    
+    if not request:
+        raise HTTPException(status_code=404, detail=f"Intervention {request_id} not found")
+    
+    return request.to_dict()
+
+
+@app.post("/api/interventions/{request_id}/approve")
+async def approve_intervention(
+    request_id: str,
+    action_reason: str | None = None,
+):
+    """
+    Approve an intervention request.
+    
+    Args:
+        request_id: The intervention request ID
+        action_reason: Optional reason for approval
+    
+    Returns:
+        Updated InterventionRequest
+    """
+    store = get_intervention_store()
+    request = store.update_request(
+        request_id=request_id,
+        status=InterventionStatus.APPROVED,
+        action_reason=action_reason,
+    )
+    
+    if not request:
+        raise HTTPException(status_code=404, detail=f"Intervention {request_id} not found")
+    
+    logger.info(f"Intervention {request_id} approved. Reason: {action_reason}")
+    return request.to_dict()
+
+
+@app.post("/api/interventions/{request_id}/reject")
+async def reject_intervention(
+    request_id: str,
+    action_reason: str | None = None,
+):
+    """
+    Reject an intervention request.
+    
+    Args:
+        request_id: The intervention request ID
+        action_reason: Optional reason for rejection
+    
+    Returns:
+        Updated InterventionRequest
+    """
+    store = get_intervention_store()
+    request = store.update_request(
+        request_id=request_id,
+        status=InterventionStatus.REJECTED,
+        action_reason=action_reason,
+    )
+    
+    if not request:
+        raise HTTPException(status_code=404, detail=f"Intervention {request_id} not found")
+    
+    logger.info(f"Intervention {request_id} rejected. Reason: {action_reason}")
+    return request.to_dict()
+
+
+# ============================================================================
+# WebSocket Endpoint for Real-Time Updates
+# ============================================================================
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+
+@app.websocket("/ws/interventions")
+async def websocket_interventions(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time intervention updates.
+    
+    Message types:
+    - subscribe: Subscribe to updates
+    - get_pending: Fetch pending requests
+    - get_metrics: Fetch metrics
+    - request_detail: Get single request details
+    
+    Sends:
+    - pending_requests: List of pending interventions
+    - metrics_update: Updated metrics
+    - new_request: New intervention created
+    - status_changed: Intervention status changed
+    """
+    await websocket.accept()
+    
+    try:
+        while True:
+            # Receive message
+            data = await websocket.receive_json()
+            message_type = data.get("type", "unknown")
+            payload = data.get("payload", {})
+            
+            logger.info(f"WebSocket message received: type={message_type}")
+            
+            # Route to handler
+            if message_type == "subscribe":
+                await handle_subscribe(websocket, payload)
+            
+            elif message_type == "get_pending":
+                await handle_get_pending(websocket, payload)
+            
+            elif message_type == "get_metrics":
+                await handle_get_metrics(websocket)
+            
+            elif message_type == "request_detail":
+                await handle_request_detail(websocket, payload)
+            
+            else:
+                await websocket.send_json({
+                    "success": False,
+                    "error": {"code": "UNKNOWN_MESSAGE", "message": f"Unknown message type: {message_type}"}
+                })
+    
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({
+                "success": False,
+                "error": {"code": "SERVER_ERROR", "message": str(e)}
+            })
+        except:
+            pass
+
+
+async def handle_subscribe(websocket: WebSocket, payload: dict):
+    """Handle subscribe message"""
+    pilot_id = payload.get("pilot_id")
+    await websocket.send_json({
+        "success": True,
+        "data": {
+            "subscribed": True,
+            "pilot_id": pilot_id,
+            "message": "Subscribed to intervention updates"
+        }
+    })
+
+
+async def handle_get_pending(websocket: WebSocket, payload: dict):
+    """Handle get_pending message"""
+    from chameleon_workflow_engine.interactive_dashboard import WebSocketMessageHandler
+    
+    handler = WebSocketMessageHandler()
+    response = handler.handle_message("get_pending", payload)
+    await websocket.send_json(response)
+
+
+async def handle_get_metrics(websocket: WebSocket):
+    """Handle get_metrics message"""
+    from chameleon_workflow_engine.interactive_dashboard import WebSocketMessageHandler
+    
+    handler = WebSocketMessageHandler()
+    response = handler.handle_message("get_metrics", {})
+    await websocket.send_json(response)
+
+
+async def handle_request_detail(websocket: WebSocket, payload: dict):
+    """Handle request_detail message"""
+    from chameleon_workflow_engine.interactive_dashboard import WebSocketMessageHandler
+    
+    handler = WebSocketMessageHandler()
+    response = handler.handle_message("request_detail", payload)
+    await websocket.send_json(response)
 
 
 @app.post("/workflows", response_model=WorkflowResponse)
@@ -1321,4 +1577,4 @@ if __name__ == "__main__":
 
     logger.info(f"Starting Chameleon Workflow Engine on {host}:{port}")
 
-    uvicorn.run("chameleon_workflow_engine.server:app", host=host, port=port, reload=True)
+    uvicorn.run("chameleon_workflow_engine.server:app", host=host, port=port, reload=False)

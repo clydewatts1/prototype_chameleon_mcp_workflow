@@ -1110,6 +1110,245 @@ class ChameleonEngine:
             )
             return first_component.interaction_id
 
+    def _apply_dci_mutations(
+        self,
+        session: Session,
+        uow: UnitsOfWork,
+        role: Local_Roles,
+        uow_attributes: Dict[str, Any]
+    ) -> None:
+        """
+        Apply Dynamic Context Injection (DCI) mutations to UOW during preparation.
+        
+        Executes during PENDING → IN_PROGRESS transition in checkout_work().
+        This implements Article XX (Model Orchestration) by evaluating CONDITIONAL_INJECTOR
+        guards and applying runtime mutations to the execution context.
+        
+        Process:
+        1. Find all CONDITIONAL_INJECTOR guards on role's INBOUND components
+        2. Evaluate rules in order against UOW attributes
+        3. Apply mutations (model_override, instructions, knowledge_fragments)
+        4. Log mutations to mutation_audit_log
+        5. Handle errors silently (ShadowLogger)
+        
+        Args:
+            session: Database session
+            uow: Unit of Work being prepared
+            role: The role acquiring this UOW
+            uow_attributes: Current UOW attributes for condition evaluation
+        
+        Constitutional References:
+        - Article XX: Model Orchestration & Dynamic Context Injection
+        - Article IX: Guardian Lifecycle (pre-execution scope)
+        """
+        from chameleon_workflow_engine.semantic_guard import SemanticGuard, shadow_logger
+        from chameleon_workflow_engine.provider_router import get_provider_router
+        from database.enums import GuardianType, ComponentDirection
+        
+        # Find all INBOUND components for this role
+        inbound_components = (
+            session.query(Local_Components)
+            .filter(
+                Local_Components.role_id == role.role_id,
+                Local_Components.direction == ComponentDirection.INBOUND.value
+            )
+            .all()
+        )
+        
+        if not inbound_components:
+            return
+        
+        # Find all CONDITIONAL_INJECTOR guards on these components
+        dci_guards = []
+        for component in inbound_components:
+            guards = (
+                session.query(Local_Guardians)
+                .filter(
+                    Local_Guardians.component_id == component.component_id,
+                    Local_Guardians.type == GuardianType.CONDITIONAL_INJECTOR.value
+                )
+                .all()
+            )
+            dci_guards.extend(guards)
+        
+        if not dci_guards:
+            logger.debug(
+                f"No CONDITIONAL_INJECTOR guards found for role {role.role_id}. "
+                f"Skipping DCI mutation."
+            )
+            return
+        
+        logger.info(
+            f"Evaluating {len(dci_guards)} CONDITIONAL_INJECTOR guard(s) "
+            f"for UOW {uow.uow_id}"
+        )
+        
+        # Initialize semantic guard for evaluation
+        guard = SemanticGuard()
+        provider_router = get_provider_router()
+        
+        # Track mutations applied
+        mutations_applied = []
+        
+        # Evaluate each DCI guard
+        for dci_guard in dci_guards:
+            attributes = dci_guard.attributes or {}
+            scope = attributes.get('scope')
+            
+            # Only process pre_execution guards during checkout
+            if scope != 'pre_execution':
+                logger.debug(
+                    f"Skipping guard {dci_guard.guardian_id} with scope '{scope}'. "
+                    f"Expected 'pre_execution'."
+                )
+                continue
+            
+            rules = attributes.get('rules', [])
+            if not rules:
+                logger.warning(
+                    f"CONDITIONAL_INJECTOR guard {dci_guard.guardian_id} "
+                    f"has no rules defined. Skipping."
+                )
+                continue
+            
+            # Evaluate rules in order
+            for rule_index, rule in enumerate(rules):
+                condition = rule.get('condition')
+                action = rule.get('action')
+                payload = rule.get('payload', {})
+                
+                if not condition:
+                    logger.warning(
+                        f"Rule {rule_index} in guard {dci_guard.guardian_id} "
+                        f"has no condition. Skipping."
+                    )
+                    continue
+                
+                if action != 'mutate':
+                    logger.debug(
+                        f"Rule {rule_index} action is '{action}', not 'mutate'. Skipping."
+                    )
+                    continue
+                
+                try:
+                    # Construct policy for semantic guard evaluation
+                    policy = {
+                        'branches': [
+                            {
+                                'condition': condition,
+                                'action': 'mutate',
+                                'payload': payload
+                            }
+                        ]
+                    }
+                    
+                    # Evaluate condition
+                    result = guard.evaluate_policy(
+                        policy=policy,
+                        uow_attributes=uow_attributes,
+                        uow_id=str(uow.uow_id)
+                    )
+                    
+                    if result.success and result.mutation_payload:
+                        # Condition matched - apply mutations
+                        mutation_entry = {
+                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                            'guard_id': str(dci_guard.guardian_id),
+                            'guard_name': dci_guard.name,
+                            'condition': condition,
+                            'model_override': payload.get('model_override'),
+                            'instructions': payload.get('instructions'),
+                            'knowledge_fragments': payload.get('knowledge_fragments')
+                        }
+                        
+                        # Apply model_override if present
+                        if payload.get('model_override'):
+                            requested_model = payload['model_override']
+                            
+                            # Validate against whitelist
+                            if provider_router.validate_model_whitelist(requested_model):
+                                uow.model_id = requested_model
+                                logger.info(
+                                    f"DCI: Applied model_override '{requested_model}' "
+                                    f"to UOW {uow.uow_id}"
+                                )
+                            else:
+                                # Use failover model
+                                failover_model = provider_router.get_failover_model(requested_model)
+                                uow.model_id = failover_model
+                                logger.warning(
+                                    f"DCI: Model '{requested_model}' failed whitelist. "
+                                    f"Using failover: '{failover_model}'"
+                                )
+                                mutation_entry['failover_used'] = True
+                                mutation_entry['failover_model'] = failover_model
+                        
+                        # Apply instructions if present
+                        if payload.get('instructions'):
+                            instructions = payload['instructions']
+                            if uow.injected_instructions:
+                                # Prepend to existing instructions
+                                uow.injected_instructions = instructions + "\n\n" + uow.injected_instructions
+                            else:
+                                uow.injected_instructions = instructions
+                            
+                            logger.info(
+                                f"DCI: Injected instructions ({len(instructions)} chars) "
+                                f"to UOW {uow.uow_id}"
+                            )
+                        
+                        # Apply knowledge_fragments if present
+                        if payload.get('knowledge_fragments'):
+                            fragments = payload['knowledge_fragments']
+                            if uow.knowledge_fragment_refs:
+                                # Merge with existing fragments (avoid duplicates)
+                                existing = set(uow.knowledge_fragment_refs)
+                                new_fragments = [f for f in fragments if f not in existing]
+                                uow.knowledge_fragment_refs.extend(new_fragments)
+                            else:
+                                uow.knowledge_fragment_refs = fragments
+                            
+                            logger.info(
+                                f"DCI: Injected {len(fragments)} knowledge fragment(s) "
+                                f"to UOW {uow.uow_id}"
+                            )
+                        
+                        mutations_applied.append(mutation_entry)
+                        
+                        # Log to ShadowLogger for audit
+                        logger.debug(
+                            f"DCI mutation applied: guard={dci_guard.name}, "
+                            f"condition='{condition}', "
+                            f"model={payload.get('model_override')}, "
+                            f"instructions_len={len(payload.get('instructions', ''))}, "
+                            f"fragments={payload.get('knowledge_fragments')}"
+                        )
+                
+                except Exception as e:
+                    # Silent failure - capture error but don't interrupt checkout
+                    shadow_logger.capture_error(
+                        branch_index=rule_index,
+                        condition=condition,
+                        error=e,
+                        uow_id=str(uow.uow_id),
+                        context=uow_attributes
+                    )
+                    logger.error(
+                        f"DCI mutation error in guard {dci_guard.guardian_id}, "
+                        f"rule {rule_index}: {e}"
+                    )
+        
+        # Update mutation_audit_log
+        if mutations_applied:
+            if uow.mutation_audit_log:
+                uow.mutation_audit_log.extend(mutations_applied)
+            else:
+                uow.mutation_audit_log = mutations_applied
+            
+            logger.info(
+                f"DCI: Applied {len(mutations_applied)} mutation(s) to UOW {uow.uow_id}"
+            )
+
     def checkout_work(
         self, actor_id: uuid.UUID, role_id: uuid.UUID
     ) -> Optional[Dict[str, Any]]:
@@ -1362,6 +1601,24 @@ class ChameleonEngine:
                         # Commit and return None (no work available due to ambiguity lock)
                         session.commit()
                         return None
+                    
+                    # Step 5.5: Apply Dynamic Context Injection (DCI) mutations
+                    # Execute CONDITIONAL_INJECTOR guards to modify execution context
+                    # (model_override, injected_instructions, knowledge_fragments)
+                    # This happens AFTER guard validation but BEFORE lock acquisition
+                    try:
+                        self._apply_dci_mutations(
+                            session=session,
+                            uow=candidate_uow,
+                            role=role,
+                            uow_attributes=uow_attributes
+                        )
+                    except Exception as e:
+                        # DCI mutation errors are logged but don't block checkout
+                        logger.error(
+                            f"DCI mutation failed for UOW {candidate_uow.uow_id}: {e}. "
+                            f"Proceeding with default execution context."
+                        )
                     
                     # Step 6: Execute Transactional Lock
                     # Transition PENDING → IN_PROGRESS (using ACTIVE status)

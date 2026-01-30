@@ -486,6 +486,8 @@ class GuardEvaluationResult:
     evaluation_errors: List[str] = field(default_factory=list)
     context_hash: Optional[str] = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Dynamic Context Injection (DCI) fields
+    mutation_payload: Optional[Dict[str, Any]] = None  # Contains model_override, instructions, knowledge_fragments
 
 
 class SemanticGuard:
@@ -595,12 +597,20 @@ class SemanticGuard:
                 
                 if matches:
                     # Condition matched - return this branch
+                    action = branch.get('action', 'proceed')
+                    
+                    # Extract mutation payload if action is 'mutate' (for DCI)
+                    mutation_payload = None
+                    if action == 'mutate':
+                        mutation_payload = branch.get('payload', {})
+                    
                     return GuardEvaluationResult(
                         success=True,
                         next_interaction=branch.get('next_interaction'),
-                        action=branch.get('action', 'proceed'),
+                        action=action,
                         matched_branch_index=branch_index,
-                        context_hash=current_hash
+                        context_hash=current_hash,
+                        mutation_payload=mutation_payload
                     )
             
             except (ExpressionSyntaxError, ExpressionEvaluationError) as e:

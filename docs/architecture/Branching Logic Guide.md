@@ -1,83 +1,38 @@
-# **Implementation Guide: Attribute-Driven Branching**
+# **Branching Logic Guide**
 
-This document defines the standards for implementing attribute-based Unit of Work (UOW) routing using the interaction\_policy. It ensures that routing is dynamic, robust, and decoupled from the execution roles.
+## **1\. Philosophy**
 
-## **1\. The Policy Configuration (YAML)**
+Chameleon relies on **Engine-Driven Branching**. Roles do not decide which path to take; the Engine evaluates the state and directs the flow.
 
-The interaction\_policy is stored in the database as JSONB. It defines a set of branches that the Semantic Guard evaluates immediately following an interaction outbound.
+## **2\. Mechanisms**
 
-interaction\_policy:  
-  type: "branching"  
-  evaluator: "attribute\_check"  
-  target\_attribute: "risk\_score"  
-  branches:  
-    \# 1\. Complex Math & Logic: Arithmetic and Boolean grouping  
-    \- condition: "((normalize\_score(score) \* 10\) \+ abs(offset\_value)) / 2 \> 8"  
-      action: "proceed"  
-      next\_state: "auto\_process\_critical"
+### **A. Attribute-Driven (Deterministic)**
 
-    \# 2\. Universal Functions: min, max, abs supported natively  
-    \- condition: "max(score, previous\_batch\_score) \< 0.3 and not is\_flagged"  
-      action: "proceed"  
-      next\_interaction: "low\_risk\_handler"
+The most common branching. The flow moves based on specific values in the global state.
 
-    \# 3\. Specific Error Handling: Explicit 'Catch' block for evaluation errors  
-    \- on\_error: true   
-      action: "escalate"  
-      next\_state: "PENDING\_PILOT\_ADJUDICATION"
+* **Example:** if state.payment\_status \== 'PAID' then goto ship\_item  
+* **Best Practice:** Keep logic simple. Avoid complex calculations in YAML.
 
-    \# 4\. Fallback (Else): The mandatory safety exit  
-    \- default: true  
-      action: "proceed"  
-      next\_interaction: "standard\_processor"
+### **B. LLM-Driven (Semantic)**
 
-## **2\. Expression Capabilities**
+An LLM (Guard or Router) analyzes text and determines the next step.
 
-The Semantic Guard utilizes a secure expression engine capable of processing:
+* **Example:** "Is the user angry?" \-\> True \-\> goto escalation\_team
 
-* **Arithmetic:** \+, \-, \*, /, % (modulo).  
-* **Boolean Logic:** and, or, not, and parentheses (...) for precedence.  
-* **Comparison:** \<, \<=, \>, \>=, \==, \!=.  
-* **Universal Functions:** abs(), min(), max(), round(), floor().  
-* **Custom Functions:** Registered system-specific calls like normalize\_score(value).  
-* **Context:** The target\_attribute is mapped to score. All other UOW attributes are injected as local variables.
+### **C. Dynamic Context Injection (DCI) & Model Orchestration**
 
-## **3\. Evaluation & Error Handling Protocol**
+The Engine modifies the *properties* of the current step based on state, rather than changing the path.
 
-To satisfy the **Safety First** pillar, the Guard follows this strict execution sequence:
+* **Use Case:** High-stakes scenarios (Fraud, VIPs) requiring better models or stricter instructions.  
+* **Reference:** [Dynamic Context Injection Specs](https://www.google.com/search?q=Dynamic_Context_Injection_Specs.md)
 
-1. **Sequential Attempt:** Evaluations proceed top-to-bottom. The first condition that returns True is executed.  
-2. **Silent Failure (Next-on-Error):** If an expression causes an error (e.g., divide-by-zero, missing variable), the Guard logs the error to the **Shadow Logger** and moves to the next branch.  
-3. **The "Catch" Block:** If a branch contains on\_error: true, it triggers ONLY if a *previous* branch failed due to an execution error.  
-4. **The "Else" Block:** The default: true branch is the final fallback, triggered if no conditions match or all previous branches errored out.
+## **3\. The "Computed State" Rule (Preventing Complexity)**
 
-## **4\. Architectural Decoupling (The Outbound Contract)**
+**Do not** put complex business logic or math inside the Workflow YAML conditions.
 
-To maintain modularity, the relationship between Roles and Guards is strictly decoupled:
+* ❌ **Bad:** condition: "state.orders.length \> 5 && (state.age \> 21 || state.location \== 'US')"  
+* ✅ **Good:** condition: "state.is\_eligible\_for\_promo"
 
-* **The Component (Data Provider):** Roles/Agents are "logic-blind." They fulfill their **Outbound Contract** by emitting specific attributes (e.g., risk\_score: 0.85) into the UOW payload. They do not know where the UOW goes next.  
-* **The Guard (Navigator):** Holds the **Routing Contract**. It intercepts the UOW post-execution, reads the interaction\_policy, and executes the "Fork in the Road" choice based on the component's data.
+**Implementation:**
 
-## **5\. Visual Representation (Mermaid)**
-
-When visualizing these policies in the Pilot Dashboard, the following decision diamond standard must be used:
-
-graph TD  
-    Start((Interaction Outbound)) \--\> Eval{Semantic Guard: Evaluate Attributes}  
-      
-    Eval \-- "normalize\_score(score) \> 8" \--\> StateCrit\[\[State: auto\_process\_critical\]\]  
-    Eval \-- "max(score, prev) \< 0.3" \--\> ToolLow\[Tool: low\_risk\_handler\]  
-    Eval \-- "Evaluation Error" \--\> PilotWait\[\[State: PENDING\_PILOT\_ADJUDICATION\]\]  
-    Eval \-- "Default/Else" \--\> ToolStd\[Tool: standard\_processor\]
-
-    style PilotWait fill:\#f96,stroke:\#333  
-    style StateCrit fill:\#f66,stroke:\#333
-
-## **6\. Atomic Verification & Traceability**
-
-Every branching decision is recorded in the uow\_history table:
-
-* **Input Hash:** The hash of the UOW before evaluation.  
-* **Context:** The specific values of the variables used during evaluation.  
-* **Result:** The Boolean outcome of the expression and the resulting destination.  
-* **Execution Log:** Any silent errors captured during the evaluation process.
+Calculate derived values (like is\_eligible\_for\_promo) in your application code (e.g., inside a specialized "Analyst" role or a pre-processor) and store the simple boolean result in the state. The Workflow YAML should only react to these simple flags.

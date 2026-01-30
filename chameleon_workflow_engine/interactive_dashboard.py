@@ -328,16 +328,33 @@ class InterventionStore:
 # Global Intervention Store
 # ============================================================================
 
-_global_intervention_store = InterventionStore()
+_global_intervention_store: Optional[InterventionStore] = None
+
+
+def initialize_intervention_store(store: Optional[InterventionStore] = None) -> InterventionStore:
+    """
+    Initialize the global intervention store.
+    
+    Args:
+        store: Store instance to use. If None, creates default in-memory store.
+    
+    Returns:
+        The initialized store.
+    """
+    global _global_intervention_store
+    _global_intervention_store = store or InterventionStore()
+    return _global_intervention_store
 
 
 def get_intervention_store() -> InterventionStore:
     """Get global intervention store."""
+    if _global_intervention_store is None:
+        initialize_intervention_store()
     return _global_intervention_store
 
 
 def set_intervention_store(store: InterventionStore) -> None:
-    """Set global intervention store (for testing)."""
+    """Set global intervention store (for testing or runtime switching)."""
     global _global_intervention_store
     _global_intervention_store = store
 
@@ -480,9 +497,18 @@ class WebSocketMessageHandler:
         
         requests = self.store.get_pending_requests(pilot_id, limit)
         
+        # Get total count - support both in-memory and database stores
+        if hasattr(self.store, 'requests'):
+            # In-memory store
+            total = len(self.store.requests)
+        else:
+            # Database store - get from metrics
+            metrics = self.store.get_metrics()
+            total = metrics.pending_interventions
+        
         return DashboardResponse.pending_requests(
             requests,
-            len(self.store.requests),
+            total,
             limit
         )
 

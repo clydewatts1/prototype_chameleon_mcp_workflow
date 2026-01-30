@@ -711,6 +711,28 @@ class UnitsOfWork(InstanceBase):
         nullable=True,
         comment="Immutable snapshot of Guardian interaction_policy at UOW creation time. Used for deterministic routing evaluation (Constitutional Article IX)."
     )
+    
+    # Dynamic Context Injection (DCI) fields - Article XX (Model Orchestration)
+    model_id = Column(
+        String(100),
+        nullable=True,
+        comment="The LLM model to use for this UOW (e.g., 'gpt-4o', 'claude-3-sonnet'). Null = use role default. Set by CONDITIONAL_INJECTOR guards during pre-execution mutation."
+    )
+    injected_instructions = Column(
+        Text,
+        nullable=True,
+        comment="Additional instructions prepended to system prompt via DCI mutation. Allows runtime prompt modification without changing role template. Injected by CONDITIONAL_INJECTOR guards."
+    )
+    knowledge_fragment_refs = Column(
+        JSON,
+        nullable=True,
+        comment="Array of knowledge fragment IDs injected for RAG retrieval. Format: ['fragment_id_1', 'fragment_id_2']. Used for context-aware knowledge injection via CONDITIONAL_INJECTOR guards."
+    )
+    mutation_audit_log = Column(
+        JSON,
+        nullable=True,
+        comment="Audit trail of DCI mutations applied to this UOW. Format: [{'timestamp': ISO8601, 'guard_id': UUID, 'guard_name': str, 'condition': str, 'model_override': str, 'instructions': str, 'knowledge_fragments': list}]. Used for debugging, compliance, and Teacher process analysis."
+    )
 
 
 class UnitsOfWorkHistory(InstanceBase):
